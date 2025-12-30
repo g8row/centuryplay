@@ -1,0 +1,51 @@
+# Shairport-sync Docker Configuration for AirPlay Testing
+# 
+# This sets up a local AirPlay receiver using shairport-sync.
+# Use this to test both AirPlay v1 (RAOP) and v2 functionality.
+#
+# Requirements:
+# - Docker Desktop for Windows with WSL2 backend
+# - Network set to "host" mode for mDNS discovery (may require WSL workarounds)
+
+services:
+  shairport-sync:
+    image: mikebrady/shairport-sync:latest
+    container_name: shairport-airplay
+    restart: unless-stopped
+    # Host networking for mDNS/Bonjour discovery (Linux only)
+    # On Windows/WSL2, you may need additional configuration
+    network_mode: host
+    # Alternatively, use port forwarding (but mDNS won't work):
+    # ports:
+    #   - "5000:5000/tcp"    # RTSP (RAOP)
+    #   - "6000-6010:6000-6010/udp"  # RTP audio
+    #   - "5353:5353/udp"    # mDNS
+    volumes:
+      - /dev/snd:/dev/snd  # Audio device access
+    devices:
+      - /dev/snd:/dev/snd
+    # Required for audio access in container
+    privileged: true
+    environment:
+      # AirPlay device name shown to clients
+      - AIRPLAY_NAME=Docker AirPlay Test
+    # Custom command to enable debugging and v1/v2 support
+    command: >
+      shairport-sync
+      --name='Docker AirPlay Test'
+      --statistics
+      --log-level=debug
+      --output=dummy
+
+  # Optional: Network traffic capture container
+  tcpdump:
+    image: nicolaka/netshoot
+    container_name: airplay-tcpdump
+    network_mode: host
+    volumes:
+      - ./captures:/captures
+    command: >
+      tcpdump -i any -w /captures/airplay_$(date +%Y%m%d_%H%M%S).pcap
+      'port 5000 or port 7000 or port 5353 or portrange 6000-6010'
+    profiles:
+      - capture  # Only start with: docker compose --profile capture up

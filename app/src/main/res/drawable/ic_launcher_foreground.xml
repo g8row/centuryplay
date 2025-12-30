@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- AirPlay-like icon (speaker with waves) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,38 L40,52 L44,52 L44,66 L64,66 L64,52 L68,52 Z" />
+    
+    <!-- Sound waves -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2"
+        android:fillColor="#00000000"
+        android:pathData="M72,44 Q78,54 72,64" />
+    
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2"
+        android:fillColor="#00000000"
+        android:pathData="M78,38 Q88,54 78,70" />
+</vector>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Disconnected status indicator (gray) -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="?attr/colorSurface"/>
+            <size android:width="14dp" android:height="14dp"/>
+        </shape>
+    </item>
+    <item android:left="2dp" android:right="2dp" android:top="2dp" android:bottom="2dp">
+        <shape android:shape="oval">
+            <solid android:color="@color/disconnected_gray"/>
+        </shape>
+    </item>
+</layer-list>

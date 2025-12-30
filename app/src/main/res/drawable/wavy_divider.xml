@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Wavy/Squiggly divider drawable for Material Design 3 Expressive -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="360dp"
+    android:height="24dp"
+    android:viewportWidth="360"
+    android:viewportHeight="24">
+    
+    <!-- Wavy line path - creates a smooth squiggly effect -->
+    <path
+        android:pathData="M0,12 
+            C30,4 60,20 90,12 
+            C120,4 150,20 180,12 
+            C210,4 240,20 270,12 
+            C300,4 330,20 360,12"
+        android:strokeWidth="3"
+        android:strokeColor="?attr/colorOutlineVariant"
+        android:fillColor="@android:color/transparent"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"/>
+</vector>

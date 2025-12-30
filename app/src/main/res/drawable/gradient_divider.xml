@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Animated wavy divider with gradient for extra expressiveness -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:type="linear"
+                android:startColor="?attr/colorPrimaryContainer"
+                android:centerColor="?attr/colorSecondaryContainer"
+                android:endColor="?attr/colorTertiaryContainer"
+                android:angle="0"/>
+            <size android:height="4dp"/>
+            <corners android:radius="2dp"/>
+        </shape>
+    </item>
+</layer-list>

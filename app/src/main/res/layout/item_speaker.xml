@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_margin="6dp"
+    style="@style/Widget.AirPlay.Card.Expressive"
+    app:cardCornerRadius="20dp"
+    app:cardElevation="4dp"
+    app:rippleColor="?attr/colorPrimaryContainer">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="16dp"
+        android:gravity="center_vertical">
+
+        <!-- Speaker Icon with animated status ring -->
+        <FrameLayout
+            android:layout_width="52dp"
+            android:layout_height="52dp">
+
+            <View
+                android:id="@+id/iconBackground"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@drawable/speaker_icon_bg_expressive"/>
+
+            <ImageView
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:src="@drawable/ic_speaker"
+                android:padding="12dp"
+                app:tint="?attr/colorOnPrimaryContainer"
+                android:contentDescription="Speaker"/>
+
+            <!-- Status indicator dot -->
+            <View
+                android:id="@+id/statusIndicator"
+                android:layout_width="14dp"
+                android:layout_height="14dp"
+                android:layout_gravity="bottom|end"
+                android:background="@drawable/indicator_dot_expressive"/>
+        </FrameLayout>
+
+        <!-- Speaker Info -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="16dp"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/speakerName"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:textColor="?attr/colorOnSurface"
+                tools:text="Living Room"/>
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="2dp"
+                android:gravity="center_vertical">
+
+                <!-- Protocol badge -->
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/protocolChip"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="v2"
+                    android:textSize="10sp"
+                    app:chipMinHeight="20dp"
+                    app:chipCornerRadius="10dp"
+                    app:chipBackgroundColor="?attr/colorTertiaryContainer"
+                    android:textColor="?attr/colorOnTertiaryContainer"
+                    app:chipStrokeWidth="0dp"/>
+
+                <TextView
+                    android:id="@+id/speakerAddress"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:textSize="12sp"
+                    android:textColor="?attr/colorOnSurfaceVariant"
+                    tools:text="192.168.1.100"/>
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Connect/Select Button -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/connectButton"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/connect"
+            android:textSize="12sp"
+            app:cornerRadius="16dp"/>
+
+    </LinearLayout>
+
+</com.google.android.material.card.MaterialCardView>

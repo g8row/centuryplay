@@ -1,0 +1,297 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout 
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fitsSystemWindows="false"
+    tools:context=".MainActivity">
+
+    <!-- Background with dynamic primary color gradient -->
+    <View
+        android:id="@+id/backgroundGradient"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="?attr/colorPrimaryContainer"/>
+
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:id="@+id/mainContent"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <!-- Header with status bar padding applied programmatically -->
+            <LinearLayout
+                android:id="@+id/header"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingHorizontal="24dp"
+                android:paddingTop="24dp"
+                android:paddingBottom="16dp">
+
+                <!-- App Title with expressive typography -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/app_name"
+                    android:textSize="32sp"
+                    android:textColor="?attr/colorOnPrimaryContainer"
+                    android:textStyle="bold"/>
+
+                <TextView
+                    android:id="@+id/statusText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="@string/no_speakers_found"
+                    android:textSize="14sp"
+                    android:textColor="?attr/colorOnPrimaryContainer"
+                    android:alpha="0.8"/>
+
+                <!-- Settings button -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/settingsButton"
+                    style="@style/Widget.Material3.Button.IconButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_gravity="end"
+                    android:contentDescription="@string/settings"
+                    app:icon="@drawable/ic_settings"
+                    app:iconTint="?attr/colorOnPrimaryContainer"
+                    android:layout_marginTop="-48dp"/>
+            </LinearLayout>
+
+            <!-- Wavy Divider -->
+            <ImageView
+                android:layout_width="match_parent"
+                android:layout_height="24dp"
+                android:src="@drawable/wavy_divider"
+                android:scaleType="fitXY"
+                android:alpha="0.6"
+                android:importantForAccessibility="no"/>
+
+            <!-- Speaker List Card with expressive corners -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/speakersCard"
+                style="@style/Widget.AirPlay.Card.Expressive"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:layout_marginHorizontal="16dp"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="8dp"
+                android:minHeight="200dp"
+                app:cardBackgroundColor="?attr/colorSurface">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:orientation="vertical">
+
+                    <!-- Section header -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:padding="16dp">
+
+                        <ImageView
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
+                            android:src="@drawable/ic_speaker"
+                            app:tint="?attr/colorPrimary"
+                            android:contentDescription="@null"/>
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginStart="12dp"
+                            android:text="@string/available_speakers"
+                            android:textSize="16sp"
+                            android:textStyle="bold"
+                            android:textColor="?attr/colorOnSurface"/>
+                    </LinearLayout>
+
+                    <!-- Gradient divider instead of plain line -->
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="4dp"
+                        android:layout_marginHorizontal="16dp"
+                        android:background="@drawable/gradient_divider"/>
+
+                    <FrameLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1">
+
+                        <androidx.recyclerview.widget.RecyclerView
+                            android:id="@+id/speakersRecyclerView"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:clipToPadding="false"
+                            android:padding="8dp"/>
+
+                        <!-- Empty state -->
+                        <LinearLayout
+                            android:id="@+id/emptyView"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:orientation="vertical"
+                            android:gravity="center"
+                            android:visibility="visible">
+
+                            <com.google.android.material.progressindicator.CircularProgressIndicator
+                                android:id="@+id/searchingIndicator"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:indeterminate="true"
+                                app:indicatorColor="?attr/colorPrimary"
+                                app:trackColor="?attr/colorSurfaceVariant"/>
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="16dp"
+                                android:text="@string/searching_speakers"
+                                android:textSize="14sp"
+                                android:textColor="?attr/colorOnSurfaceVariant"/>
+                        </LinearLayout>
+                    </FrameLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Another wavy divider -->
+            <ImageView
+                android:layout_width="match_parent"
+                android:layout_height="24dp"
+                android:src="@drawable/wavy_divider"
+                android:scaleType="fitXY"
+                android:alpha="0.6"
+                android:rotation="180"
+                android:importantForAccessibility="no"/>
+
+            <!-- Controls Card with expressive styling -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/controlsCard"
+                style="@style/Widget.AirPlay.Card.Expressive"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="16dp"
+                android:layout_marginBottom="16dp"
+                app:cardBackgroundColor="?attr/colorSurface">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="20dp">
+
+                    <!-- Connected Speaker Info -->
+                    <LinearLayout
+                        android:id="@+id/connectedSpeakerLayout"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:visibility="gone"
+                        android:layout_marginBottom="12dp">
+
+                        <View
+                            android:id="@+id/connectionIndicator"
+                            android:layout_width="12dp"
+                            android:layout_height="12dp"
+                            android:background="@drawable/indicator_dot"/>
+
+                        <TextView
+                            android:id="@+id/connectedSpeakerName"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginStart="12dp"
+                            android:textSize="16sp"
+                            android:textStyle="bold"
+                            android:textColor="?attr/colorOnSurface"
+                            tools:text="Living Room Speaker"/>
+
+                        <!-- Protocol badge -->
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/protocolChip"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="v2"
+                            android:textSize="10sp"
+                            app:chipMinHeight="24dp"
+                            app:chipBackgroundColor="?attr/colorSecondaryContainer"
+                            android:textColor="?attr/colorOnSecondaryContainer"/>
+                    </LinearLayout>
+
+                    <!-- Stream Button with expressive styling -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/streamButton"
+                        style="@style/Widget.AirPlay.Button.Expressive"
+                        android:layout_width="match_parent"
+                        android:layout_height="56dp"
+                        android:text="@string/start_streaming"
+                        android:textSize="16sp"
+                        android:enabled="false"
+                        app:icon="@drawable/ic_play"
+                        app:iconGravity="textStart"
+                        app:iconPadding="8dp"/>
+
+                    <!-- Volume Slider with Material 3 styling -->
+                    <LinearLayout
+                        android:id="@+id/volumeLayout"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:visibility="gone">
+
+                        <ImageView
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
+                            android:src="@drawable/ic_volume"
+                            app:tint="?attr/colorOnSurfaceVariant"
+                            android:contentDescription="@string/volume"/>
+
+                        <com.google.android.material.slider.Slider
+                            android:id="@+id/volumeSlider"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginHorizontal="8dp"
+                            android:valueFrom="0"
+                            android:valueTo="100"
+                            android:value="80"
+                            app:trackColorActive="?attr/colorPrimary"
+                            app:trackColorInactive="?attr/colorSurfaceVariant"
+                            app:thumbColor="?attr/colorPrimary"/>
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+
+    <!-- FAB for manual connection -->
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/fabManualConnect"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="24dp"
+        android:layout_marginBottom="120dp"
+        android:contentDescription="@string/manual_connect"
+        app:srcCompat="@drawable/ic_add"
+        app:tint="?attr/colorOnPrimaryContainer"
+        app:backgroundTint="?attr/colorPrimaryContainer"/>
+</androidx.coordinatorlayout.widget.CoordinatorLayout>
