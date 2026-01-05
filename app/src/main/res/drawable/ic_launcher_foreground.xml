@@ -5,56 +5,46 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
     
-    <!-- Android head body (rounded rectangle) -->
+    <!-- Android head (half circle / dome shape - Android 12+ style) -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M38,58 L38,72 Q38,76 42,76 L66,76 Q70,76 70,72 L70,58 Q70,48 54,48 Q38,48 38,58 Z"/>
-    
-    <!-- Left eye -->
-    <path
-        android:fillColor="#000000"
-        android:pathData="M45,60 A2,2 0 1,1 45,60.01"/>
-    
-    <!-- Right eye -->
-    <path
-        android:fillColor="#000000"
-        android:pathData="M63,60 A2,2 0 1,1 63,60.01"/>
+        android:pathData="M34,72 L34,62 A20,20 0 0,1 74,62 L74,72 Z"/>
     
     <!-- Left antenna -->
     <path
         android:strokeColor="#FFFFFF"
-        android:strokeWidth="2.5"
+        android:strokeWidth="3"
         android:strokeLineCap="round"
         android:fillColor="#00000000"
-        android:pathData="M44,48 L40,40"/>
+        android:pathData="M42,44 L38,36"/>
     
     <!-- Right antenna -->
     <path
         android:strokeColor="#FFFFFF"
-        android:strokeWidth="2.5"
+        android:strokeWidth="3"
         android:strokeLineCap="round"
         android:fillColor="#00000000"
-        android:pathData="M64,48 L68,40"/>
+        android:pathData="M66,44 L70,36"/>
     
-    <!-- AirPlay broadcast waves (concentric arcs) -->
+    <!-- AirPlay broadcast waves (concentric arcs above the head) -->
     <path
         android:strokeColor="#FFFFFF"
-        android:strokeWidth="2.5"
+        android:strokeWidth="3"
         android:strokeLineCap="round"
         android:fillColor="#00000000"
-        android:pathData="M44,36 Q54,28 64,36"/>
-    
-    <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="2.5"
-        android:strokeLineCap="round"
-        android:fillColor="#00000000"
-        android:pathData="M38,32 Q54,20 70,32"/>
+        android:pathData="M46,32 Q54,26 62,32"/>
     
     <path
         android:strokeColor="#FFFFFF"
-        android:strokeWidth="2.5"
+        android:strokeWidth="3"
         android:strokeLineCap="round"
         android:fillColor="#00000000"
-        android:pathData="M32,28 Q54,12 76,28"/>
+        android:pathData="M40,26 Q54,16 68,26"/>
+    
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M34,20 Q54,6 74,20"/>
 </vector>

@@ -89,6 +89,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         updateDeviceList()
     }
 
+    fun refreshDiscovery() {
+        // Clear existing devices (except manual ones) and restart discovery
+        val manualDevices = discoveredDevices.filter { it.value.deviceId.startsWith("manual") }
+        discoveredDevices.clear()
+        discoveredDevices.putAll(manualDevices)
+        updateDeviceList()
+        
+        // Restart discovery
+        discovery.stop()
+        startDiscovery()
+    }
+
     fun setStreamingState(isStreaming: Boolean) {
         _uiState.value = _uiState.value.copy(isStreaming = isStreaming)
     }

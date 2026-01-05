@@ -119,6 +119,15 @@
                             android:textSize="16sp"
                             android:textStyle="bold"
                             android:textColor="?attr/colorOnSurface"/>
+
+                        <ImageButton
+                            android:id="@+id/refreshButton"
+                            android:layout_width="40dp"
+                            android:layout_height="40dp"
+                            android:background="?attr/selectableItemBackgroundBorderless"
+                            android:src="@drawable/ic_refresh"
+                            app:tint="?attr/colorPrimary"
+                            android:contentDescription="@string/refresh_speakers"/>
                     </LinearLayout>
 
                     <!-- Gradient divider instead of plain line -->

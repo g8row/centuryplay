@@ -173,6 +173,12 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
 
+        // Refresh button - restarts discovery
+        binding.refreshButton.setOnClickListener {
+            viewModel.refreshDiscovery()
+            Toast.makeText(this, "Refreshing...", Toast.LENGTH_SHORT).show()
+        }
+
         binding.volumeSlider.addOnChangeListener { _, value, fromUser ->
             if (fromUser) {
                 // Volume changes will be implemented when streaming is active

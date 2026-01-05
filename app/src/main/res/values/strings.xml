@@ -14,6 +14,7 @@
     <string name="settings">Settings</string>
     <string name="volume">Volume</string>
     <string name="available_speakers">Available Speakers</string>
+    <string name="refresh_speakers">Refresh speaker list</string>
     <string name="protocol_v1">AirPlay v1</string>
     <string name="protocol_v2">AirPlay v2</string>
     <string name="protocol_auto">Auto (detect)</string>
