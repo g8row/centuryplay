@@ -20,7 +20,7 @@ data class MainUiState(
     val devices: List<AirPlayDevice> = emptyList(),
     val selectedDevice: AirPlayDevice? = null,
     val isStreaming: Boolean = false,
-    val statusMessage: String = "Searching for AirPlay speakers..."
+    val statusMessage: String = "searching for airplay speakers..."
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -43,7 +43,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             discovery.discoverDevices().collect { event ->
                 when (event) {
                     is DiscoveryEvent.DiscoveryStarted -> {
-                        updateStatus("Searching for AirPlay speakers...")
+                        updateStatus("searching for airplay speakers...")
                     }
                     is DiscoveryEvent.DeviceFound -> {
                         val key = "${event.device.host}:${event.device.port}"
@@ -63,9 +63,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun updateDeviceList() {
         val devices = discoveredDevices.values.toList()
         val message = if (devices.isEmpty()) {
-            "Searching for AirPlay speakers..."
+            "searching for airplay speakers..."
         } else {
-            "Found ${devices.size} speaker(s)"
+            "found ${devices.size} speakers"
         }
         _uiState.value = _uiState.value.copy(
             devices = devices,
@@ -99,6 +99,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val manualDevices = discoveredDevices.filter { it.value.deviceId.startsWith("manual") }
             discoveredDevices.clear()
             discoveredDevices.putAll(manualDevices)
+            
+            // Deselect any selected device
+            _uiState.value = _uiState.value.copy(selectedDevice = null)
+            
             updateDeviceList()
             
             // Cancel existing discovery job

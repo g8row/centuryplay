@@ -106,7 +106,7 @@ object LogServer {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta http-equiv="refresh" content="2">
-    <title>AirPlay Streamer Logs</title>
+    <title>centuryplay logs</title>
     <style>
         body { 
             background: #1e1e1e; 
@@ -133,7 +133,7 @@ object LogServer {
     </style>
 </head>
 <body>
-    <h1>🔊 AirPlay Streamer Logs (auto-refresh 2s)</h1>
+    <h1>🔊 centuryplay logs (auto-refresh 2s)</h1>
     <pre>$logContent</pre>
 </body>
 </html>

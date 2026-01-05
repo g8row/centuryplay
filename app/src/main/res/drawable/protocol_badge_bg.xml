@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Simple solid divider line -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
-    <solid android:color="?attr/colorOutlineVariant"/>
-    <size android:height="1dp"/>
+    <solid android:color="?attr/colorTertiaryContainer"/>
+    <corners android:radius="10dp"/>
 </shape>

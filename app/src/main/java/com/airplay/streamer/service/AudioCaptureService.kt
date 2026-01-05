@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
 import android.media.projection.MediaProjection
@@ -323,6 +324,9 @@ class AudioCaptureService : Service() {
     private fun stopCapture() {
         LogServer.log("stopCapture() called - cleaning up")
         
+        // Pause media playback so audio doesn't continue on phone speaker
+        pauseMediaPlayback()
+        
         // Set flag first to stop loops
         isCapturing = false
         
@@ -392,7 +396,9 @@ class AudioCaptureService : Service() {
     }
 
     private fun createNotification(): Notification {
-        val intent = Intent(this, MainActivity::class.java)
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
         val pendingIntent = PendingIntent.getActivity(
             this, 0, intent, 
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
@@ -407,8 +413,8 @@ class AudioCaptureService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(getString(R.string.streaming_notification_title))
-            .setContentText(getString(R.string.streaming_notification_text, deviceName))
+            .setContentTitle(getString(R.string.streaming_notification_title, deviceName))
+            .setContentText(getString(R.string.streaming_notification_text))
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentIntent(pendingIntent)
             .addAction(android.R.drawable.ic_media_pause, getString(R.string.stop_streaming), stopPendingIntent)
@@ -417,4 +423,47 @@ class AudioCaptureService : Service() {
     }
 
     fun isCurrentlyStreaming(): Boolean = isCapturing
+
+    /**
+     * Set volume on the AirPlay speaker (0.0 to 1.0)
+     */
+    fun setVolume(volume: Float) {
+        serviceScope.launch {
+            try {
+                raopClient?.setVolume(volume)
+                LogServer.log("Volume set to ${(volume * 100).toInt()}%")
+            } catch (e: Exception) {
+                LogServer.log("Failed to set volume: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Pause media playback using AudioManager's media key event
+     * This prevents audio from suddenly playing through phone speakers after disconnect
+     */
+    private fun pauseMediaPlayback() {
+        try {
+            val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            if (audioManager.isMusicActive) {
+                // Send media pause key event
+                val eventTime = android.os.SystemClock.uptimeMillis()
+                val downEvent = android.view.KeyEvent(
+                    eventTime, eventTime,
+                    android.view.KeyEvent.ACTION_DOWN,
+                    android.view.KeyEvent.KEYCODE_MEDIA_PAUSE, 0
+                )
+                val upEvent = android.view.KeyEvent(
+                    eventTime, eventTime,
+                    android.view.KeyEvent.ACTION_UP,
+                    android.view.KeyEvent.KEYCODE_MEDIA_PAUSE, 0
+                )
+                audioManager.dispatchMediaKeyEvent(downEvent)
+                audioManager.dispatchMediaKeyEvent(upEvent)
+                LogServer.log("Paused media playback")
+            }
+        } catch (e: Exception) {
+            LogServer.log("Failed to pause media: ${e.message}")
+        }
+    }
 }

@@ -1,14 +1,14 @@
 <resources>
-    <string name="app_name">CenturyPlay</string>
+    <string name="app_name">centuryplay</string>
     <string name="no_speakers_found">searching for speakers…</string>
     <string name="searching_speakers">searching for speakers…</string>
     <string name="start_streaming">stream</string>
-    <string name="stop_streaming">stop</string>
+    <string name="stop_streaming">disconnect</string>
     <string name="connect">connect</string>
     <string name="disconnect">disconnect</string>
     <string name="not_playing">not playing</string>
-    <string name="streaming_notification_title">centuryplay</string>
-    <string name="streaming_notification_text">streaming to %s</string>
+    <string name="streaming_notification_title">streaming to %s</string>
+    <string name="streaming_notification_text">tap to open app</string>
     
     <!-- New strings for updated UI -->
     <string name="settings">settings</string>

@@ -1,4 +1,4 @@
-# AirPlay Streamer - Development Guide
+# centuryplay - development guide
 
 ## Build Environment
 
@@ -51,7 +51,7 @@ sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
 
 #### Build Command (Linux)
 ```bash
-cd /path/to/airplay-android
+cd /path/to/centuryplay
 chmod +x gradlew   # First time only
 ./gradlew assembleDebug
 ```

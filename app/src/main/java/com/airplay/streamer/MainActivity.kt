@@ -144,13 +144,41 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupRecyclerView() {
         speakerAdapter = SpeakerAdapter { device ->
-            viewModel.selectDevice(device)
+            // Check if currently streaming
+            val isStreaming = AudioCaptureService.instance?.isCurrentlyStreaming() == true
+            val currentDevice = viewModel.uiState.value.selectedDevice
+            
+            if (isStreaming && currentDevice != null) {
+                // If tapping the same speaker that's playing, do nothing
+                if (currentDevice.host == device.host && currentDevice.port == device.port) {
+                    return@SpeakerAdapter
+                }
+                // Show confirmation dialog for switching to different speaker
+                showSwitchSpeakerDialog(device)
+            } else {
+                viewModel.selectDevice(device)
+            }
         }
 
         binding.speakersRecyclerView.apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
             adapter = speakerAdapter
+            // Disable item animations to prevent crash on rapid tapping
+            itemAnimator = null
         }
+    }
+    
+    private fun showSwitchSpeakerDialog(newDevice: com.airplay.streamer.discovery.AirPlayDevice) {
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+            .setTitle("Switch Speaker?")
+            .setMessage("This will stop streaming to the current speaker and switch to ${newDevice.displayName}.")
+            .setPositiveButton("Switch") { _, _ ->
+                // Stop current stream and switch
+                stopStreaming()
+                viewModel.selectDevice(newDevice)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun setupControls() {
@@ -179,11 +207,15 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Refreshing...", Toast.LENGTH_SHORT).show()
         }
 
-        binding.volumeSlider.addOnChangeListener { _, value, fromUser ->
+        binding.volumeSlider.addOnChangeListener { value, fromUser ->
             if (fromUser) {
-                // Volume changes will be implemented when streaming is active
+                // WavySlider already uses 0.0-1.0 range
+                AudioCaptureService.instance?.setVolume(value)
             }
         }
+        
+        // Set initial volume to 80%
+        binding.volumeSlider.setValue(0.8f)
     }
 
     private fun observeState() {
@@ -233,11 +265,55 @@ class MainActivity : AppCompatActivity() {
         if (isStreaming) {
             binding.streamButton.text = getString(R.string.stop_streaming)
             binding.streamButton.setIconResource(R.drawable.ic_stop)
+            
+            // Smooth transition for layout changes - animate the parent so all children move together
+            val transition = androidx.transition.ChangeBounds().apply {
+                duration = 450
+                interpolator = android.view.animation.OvershootInterpolator(2.0f)
+            }
+            androidx.transition.TransitionManager.beginDelayedTransition(
+                binding.mainContent,
+                transition
+            )
+            
+            // Show volume layout
             binding.volumeLayout.visibility = View.VISIBLE
+            
+            binding.streamingStatusText.visibility = View.VISIBLE
+            binding.streamingStatusText.text = "streaming..."
+            
+            // Pulse animation on the connection indicator
+            binding.connectionIndicator.animate()
+                .scaleX(1.2f).scaleY(1.2f)
+                .setDuration(500)
+                .withEndAction {
+                    binding.connectionIndicator.animate()
+                        .scaleX(1f).scaleY(1f)
+                        .setDuration(500)
+                        .start()
+                }
+                .start()
         } else {
             binding.streamButton.text = getString(R.string.start_streaming)
             binding.streamButton.setIconResource(R.drawable.ic_play)
+            
+            // Smooth transition for layout changes - animate the parent so all children move together
+            val transition = androidx.transition.ChangeBounds().apply {
+                duration = 350
+                interpolator = android.view.animation.OvershootInterpolator(1.5f)
+            }
+            androidx.transition.TransitionManager.beginDelayedTransition(
+                binding.mainContent,
+                transition
+            )
+            
+            // Hide volume layout
             binding.volumeLayout.visibility = View.GONE
+            
+            binding.streamingStatusText.visibility = View.GONE
+            binding.connectionIndicator.animate().cancel()
+            binding.connectionIndicator.scaleX = 1f
+            binding.connectionIndicator.scaleY = 1f
         }
     }
 
@@ -275,6 +351,20 @@ class MainActivity : AppCompatActivity() {
             putExtra(AudioCaptureService.EXTRA_DEVICE_NAME, device.displayName)
         }
         startForegroundService(serviceIntent)
+        
+        // Update UI immediately to show streaming state
+        viewModel.setStreamingState(true)
+        updateStreamingUI(true)
+        
+        // Register callback after service starts (with small delay to ensure service is created)
+        binding.root.postDelayed({
+            AudioCaptureService.instance?.onStateChanged = { isStreaming ->
+                runOnUiThread {
+                    viewModel.setStreamingState(isStreaming)
+                    updateStreamingUI(isStreaming)
+                }
+            }
+        }, 100)
     }
 
     private fun stopStreaming() {

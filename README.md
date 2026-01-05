@@ -1,4 +1,4 @@
-# CenturyPlay
+# centuryplay
 
 📱 Stream audio from your Android device to AirPlay speakers and receivers.
 
@@ -10,7 +10,7 @@
 
 This project started as a way to breathe new life into a **Bang & Olufsen BeoSound Century** - a beautiful 1990s hi-fi system with stunning sound quality but no wireless capabilities. By adding a Raspberry Pi running [shairport-sync](https://github.com/mikebrady/shairport-sync), the Century can now receive AirPlay audio streams, bridging four decades of audio technology.
 
-CenturyPlay completes the chain by letting Android devices stream system audio to shairport-sync (or any AirPlay receiver), effectively turning a vintage B&O system into a modern wireless speaker.
+centuryplay completes the chain by letting Android devices stream system audio to shairport-sync (or any AirPlay receiver), effectively turning a vintage B&O system into a modern wireless speaker.
 
 ## Features
 
@@ -113,10 +113,15 @@ See [docs/AIRPLAY_PROTOCOL.md](docs/AIRPLAY_PROTOCOL.md) for detailed protocol d
 
 ## Tested Receivers
 
-- ✅ shairport-sync (v4.x)
-- ✅ shairport-sync (v3.x)
-- ⚠️ Apple TV (may require AirPlay 2)
-- ⚠️ HomePod (requires AirPlay 2)
+| Receiver | Protocol | Status | Notes |
+|----------|----------|--------|-------|
+| shairport-sync v4.x | AirPlay 1 | ✅ Working | Recommended for testing |
+| shairport-sync v3.x | AirPlay 1 | ✅ Working | |
+| Airport Express | AirPlay 1 | ✅ Working | |
+| Apple TV (Gen 2-3) | AirPlay 1 | ✅ Working | |
+| Apple TV 4K | AirPlay 2 | ⚠️ Requires AirPlay 2 | In development |
+| HomePod / HomePod mini | AirPlay 2 | ⚠️ Requires AirPlay 2 | In development |
+| AirScreen (Android) | AirPlay 1 | ⚠️ Compatibility issues | May not work |
 
 ## Known Limitations
 
@@ -124,9 +129,39 @@ See [docs/AIRPLAY_PROTOCOL.md](docs/AIRPLAY_PROTOCOL.md) for detailed protocol d
 - **AirPlay 2**: Modern Apple devices may require AirPlay 2 which is still in development
 - **Latency**: There's inherent ~2-3 second latency due to buffering requirements
 
+## Changelog
+
+### v0.2 (January 2026)
+- ✨ Custom animated wavy volume slider
+- 🎨 Material Design 3 UI with expressive theming
+- 🔊 Speaker selection with accent-colored card outline
+- 💫 Bouncy animations for UI transitions
+- 🔔 Improved notification handling (preserves app state)
+- 🛡️ Fixed crash on rapid speaker list tapping
+- 🛡️ Fixed multicast lock release crash on refresh
+- ⏸️ Media pause on disconnect
+- 🔌 Connection health monitoring
+- 📝 Comprehensive protocol documentation
+
+### v0.1 (December 2025)
+- Initial release
+- AirPlay 1 (RAOP) support
+- mDNS device discovery
+- Encrypted audio streaming
+
 ## Development
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for build instructions and development notes.
+
+### Tech Stack
+
+- **Language**: Kotlin
+- **UI**: Android Views with ViewBinding (no Compose)
+- **Architecture**: MVVM with StateFlow
+- **Concurrency**: Kotlin Coroutines + Flow
+- **Networking**: Raw sockets (RTSP/RTP), jmDNS for mDNS discovery
+- **Crypto**: BouncyCastle for RSA/AES encryption
+- **Min SDK**: 29 (Android 10) - required for AudioPlaybackCapture API
 
 ### Project Structure
 

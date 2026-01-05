@@ -130,10 +130,10 @@
                             android:contentDescription="@string/refresh_speakers"/>
                     </LinearLayout>
 
-                    <!-- Gradient divider instead of plain line -->
+                    <!-- Simple divider line -->
                     <View
                         android:layout_width="match_parent"
-                        android:layout_height="4dp"
+                        android:layout_height="1dp"
                         android:layout_marginHorizontal="16dp"
                         android:background="@drawable/gradient_divider"/>
 
@@ -175,18 +175,21 @@
                                 android:textColor="?attr/colorOnSurfaceVariant"/>
                         </LinearLayout>
                     </FrameLayout>
+
+                    <!-- Footer tip -->
+                    <TextView
+                        android:id="@+id/speakerListFooter"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:paddingHorizontal="16dp"
+                        android:paddingVertical="8dp"
+                        android:text="tap a speaker to select it"
+                        android:textSize="12sp"
+                        android:textColor="?attr/colorOnSurfaceVariant"
+                        android:alpha="0.6"
+                        android:gravity="center"/>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
-
-            <!-- Another wavy divider -->
-            <ImageView
-                android:layout_width="match_parent"
-                android:layout_height="24dp"
-                android:src="@drawable/wavy_divider"
-                android:scaleType="fitXY"
-                android:alpha="0.6"
-                android:rotation="180"
-                android:importantForAccessibility="no"/>
 
             <!-- Controls Card with expressive styling -->
             <com.google.android.material.card.MaterialCardView
@@ -220,16 +223,31 @@
                             android:layout_height="12dp"
                             android:background="@drawable/indicator_dot"/>
 
-                        <TextView
-                            android:id="@+id/connectedSpeakerName"
+                        <LinearLayout
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
                             android:layout_marginStart="12dp"
-                            android:textSize="16sp"
-                            android:textStyle="bold"
-                            android:textColor="?attr/colorOnSurface"
-                            tools:text="Living Room Speaker"/>
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:id="@+id/connectedSpeakerName"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:textSize="16sp"
+                                android:textStyle="bold"
+                                android:textColor="?attr/colorOnSurface"
+                                tools:text="Living Room Speaker"/>
+
+                            <TextView
+                                android:id="@+id/streamingStatusText"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:textSize="12sp"
+                                android:textColor="?attr/colorPrimary"
+                                android:visibility="gone"
+                                android:text="streaming..."/>
+                        </LinearLayout>
 
                         <!-- Protocol badge -->
                         <com.google.android.material.chip.Chip
@@ -273,18 +291,12 @@
                             app:tint="?attr/colorOnSurfaceVariant"
                             android:contentDescription="@string/volume"/>
 
-                        <com.google.android.material.slider.Slider
+                        <com.airplay.streamer.ui.WavySlider
                             android:id="@+id/volumeSlider"
                             android:layout_width="0dp"
-                            android:layout_height="wrap_content"
+                            android:layout_height="48dp"
                             android:layout_weight="1"
-                            android:layout_marginHorizontal="8dp"
-                            android:valueFrom="0"
-                            android:valueTo="100"
-                            android:value="80"
-                            app:trackColorActive="?attr/colorPrimary"
-                            app:trackColorInactive="?attr/colorSurfaceVariant"
-                            app:thumbColor="?attr/colorPrimary"/>
+                            android:layout_marginHorizontal="8dp"/>
                     </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>

@@ -572,10 +572,19 @@ class RaopClient(
      * Monitors the TCP RTSP socket to detect if the server has disconnected
      */
     private fun startHealthMonitor() {
-        logD("Starting connection health monitor")
+        logD("startHealthMonitor() called")
+        
+        // Ensure any previous health monitor is stopped first
+        if (isHealthMonitorRunning.get()) {
+            logD("Stopping previous health monitor first")
+            stopHealthMonitor()
+        }
+        
+        logD("Starting connection health monitor thread")
         isHealthMonitorRunning.set(true)
         
         Thread {
+            logD("Health monitor thread started")
             try {
                 while (isHealthMonitorRunning.get() && isConnected.get()) {
                     Thread.sleep(HEALTH_CHECK_INTERVAL_MS)
@@ -589,6 +598,8 @@ class RaopClient(
                         handleServerDisconnect()
                         break
                     }
+                    
+                    logD("Health check: socket alive")
                     
                     // The most reliable way to detect if the server closed the connection
                     // is to actually try to read from the socket with a short timeout

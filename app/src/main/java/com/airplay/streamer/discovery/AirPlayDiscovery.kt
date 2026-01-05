@@ -208,7 +208,12 @@ class AirPlayDiscovery(
     fun stop() {
         jmDNS?.close()
         jmDNS = null
-        multicastLock?.release()
+        // Only release if the lock is held
+        multicastLock?.let { lock ->
+            if (lock.isHeld) {
+                lock.release()
+            }
+        }
         multicastLock = null
         discoveredDevices.clear()
     }

@@ -1,16 +1,17 @@
 package com.airplay.streamer.ui
 
+import android.content.res.ColorStateList
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
 import android.widget.TextView
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.airplay.streamer.R
 import com.airplay.streamer.discovery.AirPlayDevice
-import com.google.android.material.chip.Chip
+import com.google.android.material.card.MaterialCardView
+import com.google.android.material.color.MaterialColors
 
 class SpeakerAdapter(
     private val onConnectClick: (AirPlayDevice) -> Unit
@@ -33,11 +34,10 @@ class SpeakerAdapter(
     }
 
     class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        private val card: MaterialCardView = itemView as MaterialCardView
         private val speakerName: TextView = itemView.findViewById(R.id.speakerName)
         private val speakerAddress: TextView = itemView.findViewById(R.id.speakerAddress)
-        private val connectButton: Button = itemView.findViewById(R.id.connectButton)
-        private val statusIndicator: View = itemView.findViewById(R.id.statusIndicator)
-        private val protocolChip: Chip = itemView.findViewById(R.id.protocolChip)
+        private val protocolBadge: TextView = itemView.findViewById(R.id.protocolChip)
 
         fun bind(item: SpeakerItem, onConnectClick: (AirPlayDevice) -> Unit) {
             speakerName.text = item.device.displayName
@@ -45,19 +45,20 @@ class SpeakerAdapter(
             
             // Show protocol version based on port
             val isV2 = item.device.port == 7000
-            protocolChip.text = if (isV2) "v2" else "v1"
+            protocolBadge.text = if (isV2) "v2" else "v1"
 
-            if (item.isConnected) {
-                connectButton.text = itemView.context.getString(R.string.disconnect)
-                statusIndicator.setBackgroundResource(R.drawable.indicator_dot_expressive)
-            } else {
-                connectButton.text = itemView.context.getString(R.string.connect)
-                statusIndicator.setBackgroundResource(R.drawable.indicator_disconnected)
-            }
-
-            connectButton.setOnClickListener {
-                onConnectClick(item.device)
-            }
+            // Get Material colors
+            val colorPrimary = MaterialColors.getColor(itemView, com.google.android.material.R.attr.colorPrimary)
+            val density = itemView.resources.displayMetrics.density
+            
+            // Set stroke immediately without animation (prevents RecyclerView crash on rapid tapping)
+            val targetStrokeWidth = if (item.isConnected) (3 * density).toInt() else 0
+            
+            card.strokeColor = colorPrimary
+            card.setStrokeColor(ColorStateList.valueOf(colorPrimary))
+            
+            // Set stroke width immediately (no animation to prevent RecyclerView conflicts)
+            card.strokeWidth = targetStrokeWidth
             
             // Make entire card clickable
             itemView.setOnClickListener {

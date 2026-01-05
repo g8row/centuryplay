@@ -18,7 +18,7 @@
         android:padding="16dp"
         android:gravity="center_vertical">
 
-        <!-- Speaker Icon with animated status ring -->
+        <!-- Speaker Icon -->
         <FrameLayout
             android:layout_width="52dp"
             android:layout_height="52dp">
@@ -36,14 +36,6 @@
                 android:padding="12dp"
                 app:tint="?attr/colorOnPrimaryContainer"
                 android:contentDescription="Speaker"/>
-
-            <!-- Status indicator dot -->
-            <View
-                android:id="@+id/statusIndicator"
-                android:layout_width="14dp"
-                android:layout_height="14dp"
-                android:layout_gravity="bottom|end"
-                android:background="@drawable/indicator_dot_expressive"/>
         </FrameLayout>
 
         <!-- Speaker Info -->
@@ -52,6 +44,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:layout_marginStart="16dp"
+            android:layout_gravity="center_vertical"
             android:orientation="vertical">
 
             <TextView
@@ -67,21 +60,20 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:layout_marginTop="2dp"
+                android:layout_marginTop="4dp"
                 android:gravity="center_vertical">
 
-                <!-- Protocol badge -->
-                <com.google.android.material.chip.Chip
+                <!-- Protocol badge - use TextView styled as badge instead of Chip for better sizing -->
+                <TextView
                     android:id="@+id/protocolChip"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="v2"
                     android:textSize="10sp"
-                    app:chipMinHeight="20dp"
-                    app:chipCornerRadius="10dp"
-                    app:chipBackgroundColor="?attr/colorTertiaryContainer"
-                    android:textColor="?attr/colorOnTertiaryContainer"
-                    app:chipStrokeWidth="0dp"/>
+                    android:paddingHorizontal="8dp"
+                    android:paddingVertical="2dp"
+                    android:background="@drawable/protocol_badge_bg"
+                    android:textColor="?attr/colorOnTertiaryContainer"/>
 
                 <TextView
                     android:id="@+id/speakerAddress"
@@ -93,16 +85,6 @@
                     tools:text="192.168.1.100"/>
             </LinearLayout>
         </LinearLayout>
-
-        <!-- Connect/Select Button -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/connectButton"
-            style="@style/Widget.Material3.Button.TonalButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/connect"
-            android:textSize="12sp"
-            app:cornerRadius="16dp"/>
 
     </LinearLayout>
 
