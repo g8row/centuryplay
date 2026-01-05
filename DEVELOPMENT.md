@@ -1,21 +1,91 @@
 # AirPlay Streamer - Development Guide
 
 ## Build Environment
-The project requires a specific JDK (bundled with Android Studio) and Android SDK.
-Use the following PowerShell command to build, ensuring the environment variables are set correctly for the session.
 
-### **Build Command (PowerShell)**
-```powershell
-$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"; $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"; .\gradlew.bat assembleDebug --no-daemon
+### Prerequisites
+- **Java JDK 17+** (JDK 21 recommended)
+- **Android SDK** with:
+  - Platform SDK 34 (Android 14)
+  - Build Tools 34.0.0
+  - Platform Tools (adb)
+
+### Linux Setup
+
+#### Install Java
+```bash
+# Debian/Ubuntu
+sudo apt install openjdk-21-jdk
+
+# Verify
+java -version
 ```
 
-*Note: Accessing the `jbr` directory requires quotes due to spaces in "Program Files".*
+#### Install Android SDK (Option 1: Android Studio)
+```bash
+# Via snap (recommended)
+sudo snap install android-studio --classic
+
+# Launch Android Studio and complete setup wizard to download SDK
+# SDK will be installed to ~/Android/Sdk by default
+```
+
+#### Install Android SDK (Option 2: Command-line only)
+```bash
+# Create SDK directory
+mkdir -p ~/Android/Sdk/cmdline-tools
+cd ~/Android/Sdk/cmdline-tools
+
+# Download command-line tools
+wget https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+unzip commandlinetools-linux-*.zip
+mv cmdline-tools latest
+
+# Add to PATH (add to ~/.bashrc or ~/.zshrc)
+export ANDROID_HOME=~/Android/Sdk
+export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
+
+# Accept licenses and install components
+sdkmanager --licenses
+sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+```
+
+#### Build Command (Linux)
+```bash
+cd /path/to/airplay-android
+chmod +x gradlew   # First time only
+./gradlew assembleDebug
+```
+
+The APK will be at: `app/build/outputs/apk/debug/app-debug.apk`
+
+### Windows Setup
+
+#### Prerequisites
+- Android Studio installed (includes JDK and SDK)
+
+#### Build Command (PowerShell)
+```powershell
+$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
+$env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
+.\gradlew.bat assembleDebug --no-daemon
+```
+
+---
 
 ## Deployment & Debugging
 
-### **Uninstall & Install**
-It is recommended to uninstall the previous version before installing a new debug build to clear app state.
+### Install APK
 
+#### Linux
+```bash
+# Uninstall previous version (optional, clears app state)
+adb uninstall com.airplay.streamer
+
+# Install debug APK
+adb install app/build/outputs/apk/debug/app-debug.apk
+```
+
+#### Windows (PowerShell)
 ```powershell
 # Uninstall
 .\platform-tools\adb.exe uninstall com.airplay.streamer
@@ -24,19 +94,25 @@ It is recommended to uninstall the previous version before installing a new debu
 .\platform-tools\adb.exe install app\build\outputs\apk\debug\app-debug.apk
 ```
 
-### **Logging**
-Retrieve logs using ADB or the built-in Web Log Server (if accessible).
+### Logging
 
-```powershell
+#### Linux
+```bash
 # ADB Logcat (Last 2000 lines)
-.\platform-tools\adb.exe logcat -d -t 2000
+adb logcat -d -t 2000
 
-# Filter for just our app
+# Filter for app logs
+adb logcat -d -t 2000 | grep -E "AirPlay|RAOP|AudioCapture|RaopClient"
+```
+
+#### Windows (PowerShell)
+```powershell
 .\platform-tools\adb.exe logcat -d -t 2000 | Select-String -Pattern "AirPlay|RAOP|AudioCapture"
 ```
 
-### **Web Log Server**
-*   URL: `http://<PHONE_IP>:8080/`
+### Web Log Server
+The app runs a web server for viewing logs in real-time:
+- URL: `http://<PHONE_IP>:8080/`
 
 ---
 

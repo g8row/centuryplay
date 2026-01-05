@@ -1,4 +1,4 @@
-# Default ignored files
+# Gradle
 .gradle/
 build/
 !gradle/wrapper/gradle-wrapper.jar
@@ -32,3 +32,15 @@ platform-tools/
 *.zip
 gradle-8.5/
 bin/
+
+# Logs
+*.log
+logcat*.txt
+
+# OS files
+Thumbs.db
+*~
+
+# Docker (not needed for this project)
+docker-compose.yml
+Dockerfile
