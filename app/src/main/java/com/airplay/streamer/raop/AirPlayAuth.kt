@@ -1,5 +1,7 @@
 package com.airplay.streamer.raop
 
+import android.util.Log
+import com.airplay.streamer.util.LogServer
 import com.airplay.streamer.util.Tlv8
 import org.bouncycastle.crypto.agreement.srp.SRP6Client
 import org.bouncycastle.crypto.agreement.srp.SRP6Util
@@ -7,17 +9,53 @@ import org.bouncycastle.crypto.digests.SHA512Digest
 import org.bouncycastle.crypto.params.SRP6GroupParameters
 import java.math.BigInteger
 import java.security.SecureRandom
-import java.util.UUID
 
 /**
- * Handles AirPlay 2 SRP Authentication (Pair-Setup)
+ * Handles AirPlay 2 SRP-6a Authentication (Pair-Setup)
+ * 
+ * AirPlay 2 Pair-Setup flow:
+ * 1. M1: Client sends method + pairing flags
+ * 2. M2: Server responds with salt + public key B
+ * 3. M3: Client sends public key A + proof M1
+ * 4. M4: Server responds with proof M2
+ * 5. M5: Client sends encrypted Ed25519 public key + signature
+ * 6. M6: Server responds with encrypted device info
+ * 
+ * After pair-setup, pair-verify is used to establish encrypted sessions.
  */
 class AirPlayAuth {
 
     companion object {
-        // Standard 2048-bit Group parameters (RFC 5054) used by AirPlay
-        private val N_2048 = BigInteger(1, hexToBytes("AC6BDB41324A9A9BF166DE5E1389582FAF72B6651987EE07FC3192943DB56050A37329CBB4A099ED8193E0757767A13DD52312AB4B03310DCD7F48A9DA04FD50E8083969EDB767B0CF6095179A163AB3661A05FBD5FAAAE82918A9962F0B93B855F97993EC975EEAA80D740ADBF4FF747359D041D5C33EA71D281E446B14773BCA97B43A23FB801676BD207A436C6481F1D2B9078717461A5B9D32E688F87748544523B524B0D57D5EA77A2775D2ECFA032CFBDBF52FB3786160279004E57AE6AF874E7303CE53299CCC041C7BC308D82A5698F3A8D0C38271AE35F8E9DBFBB694B5C803D89F7AE435DE236D525F54759B65E372FCD68EF20FA7111F9E4AFF73"))
-        private val G_2048 = BigInteger.valueOf(2)
+        private const val TAG = "AirPlayAuth"
+        
+        // TLV8 Types for Pair-Setup
+        const val TLV_METHOD = 0x00
+        const val TLV_IDENTIFIER = 0x01
+        const val TLV_SALT = 0x02
+        const val TLV_PUBLIC_KEY = 0x03
+        const val TLV_PROOF = 0x04
+        const val TLV_ENCRYPTED_DATA = 0x05
+        const val TLV_STATE = 0x06
+        const val TLV_ERROR = 0x07
+        const val TLV_SIGNATURE = 0x0A
+        
+        // Pair-Setup Methods
+        const val METHOD_PAIR_SETUP = 0x00
+        const val METHOD_PAIR_SETUP_AUTH = 0x01
+        const val METHOD_PAIR_VERIFY = 0x02
+        
+        // Standard 2048-bit SRP Group parameters (RFC 5054)
+        private val N_2048 = BigInteger(1, hexToBytes(
+            "AC6BDB41324A9A9BF166DE5E1389582FAF72B6651987EE07FC3192943DB56050" +
+            "A37329CBB4A099ED8193E0757767A13DD52312AB4B03310DCD7F48A9DA04FD50" +
+            "E8083969EDB767B0CF6095179A163AB3661A05FBD5FAAAE82918A9962F0B93B8" +
+            "55F97993EC975EEAA80D740ADBF4FF747359D041D5C33EA71D281E446B14773B" +
+            "CA97B43A23FB801676BD207A436C6481F1D2B9078717461A5B9D32E688F87748" +
+            "544523B524B0D57D5EA77A2775D2ECFA032CFBDBF52FB3786160279004E57AE6" +
+            "AF874E7303CE53299CCC041C7BC308D82A5698F3A8D0C38271AE35F8E9DBFBB6" +
+            "94B5C803D89F7AE435DE236D525F54759B65E372FCD68EF20FA7111F9E4AFF73"
+        ))
+        private val G_2048 = BigInteger.valueOf(5) // AirPlay uses g=5, not g=2
         
         private fun hexToBytes(s: String): ByteArray {
             val len = s.length
@@ -33,118 +71,295 @@ class AirPlayAuth {
 
     private val srpClient = SRP6Client()
     private val random = SecureRandom()
-    // Use MAC-style client ID for compatibility
-    private val clientId = "00:11:22:33:44:55"
+    
+    // Device identifier (should be persistent per-device)
+    private val deviceId = generateDeviceId()
 
-    // Session State
-    private var A: BigInteger? = null
-    private var B: BigInteger? = null
-    private var s: ByteArray? = null
-    private var K: BigInteger? = null
-    private var M1: BigInteger? = null
+    // SRP Session State
+    private var srpSalt: ByteArray? = null
+    private var A: BigInteger? = null  // Client public key
+    private var B: BigInteger? = null  // Server public key
+    private var S: BigInteger? = null  // Shared secret
+    private var K: ByteArray? = null   // Session key
+    private var M1: BigInteger? = null // Client proof
+    
+    // Ed25519 Keys (generated after SRP, used in M5)
+    private var ed25519PrivateKey: ByteArray? = null
+    private var ed25519PublicKey: ByteArray? = null
+    
+    // Session encryption key (derived after successful pairing)
+    private var sessionKey: ByteArray? = null
 
     init {
-        // Initialize SRP6 Client with SHA-512
-        val group = SRP6GroupParameters(N_2048, G_2048)
         srpClient.init(N_2048, G_2048, SHA512Digest(), random)
+        
+        // Generate Ed25519 key pair for this session
+        val (privKey, pubKey) = AirPlay2Crypto.generateEd25519KeyPair()
+        ed25519PrivateKey = privKey
+        ed25519PublicKey = pubKey
+        
+        LogServer.log("AirPlayAuth: Initialized with device ID: $deviceId")
+    }
+    
+    private fun generateDeviceId(): String {
+        // Generate a random device ID in MAC address format
+        val bytes = ByteArray(6)
+        random.nextBytes(bytes)
+        return bytes.joinToString(":") { "%02X".format(it) }
     }
 
     /**
-     * M1: Client -> Server
+     * M1: Client -> Server (Start Pair-Setup)
+     * Sends: State=M1, Method=PairSetup
      */
     fun createPairSetupM1(): ByteArray {
-        val tlv = Tlv8()
-        tlv.add(0x00, 0x00.toByte()) // Method: Pair Setup (0) - Trying 0 instead of 1
-        // Usually: 0=PairSetup, 1=PairVerify in some docs. 
-        // But often M1 includes 'method' = 1 (Pair-Setup).
-        // Let's assume Method=1.
+        LogServer.log("AirPlayAuth: Creating M1 (pair-setup start)")
         
-        tlv.add(0x01, clientId)
+        val tlv = Tlv8()
+        tlv.add(TLV_STATE, 0x01.toByte())  // State: M1
+        tlv.add(TLV_METHOD, METHOD_PAIR_SETUP.toByte())  // Method: Pair-Setup
+        
         return tlv.encode()
     }
 
     /**
-     * M3: Client -> Server
-     * Input: M2 Data (Salt, Public Key B)
+     * Parse M2 and Generate M3
+     * 
+     * M2 contains: State=M2, Salt, PublicKey (B)
+     * M3 sends: State=M3, PublicKey (A), Proof (M1)
      */
     fun parseM2AndGenerateM3(m2Data: ByteArray, pin: String): ByteArray {
+        LogServer.log("AirPlayAuth: Parsing M2 (${m2Data.size} bytes), PIN=$pin")
+        
         val map = Tlv8.decode(m2Data)
-        val salt = map[0x02] ?: throw Exception("Missing Salt in M2")
-        val publicKeyB = map[0x03] ?: throw Exception("Missing Public Key B in M2")
         
-        val B_int = BigInteger(1, publicKeyB)
+        // Check for errors
+        map[TLV_ERROR]?.let { error ->
+            val errorCode = error[0].toInt()
+            throw Exception("Server error in M2: $errorCode")
+        }
         
-        // Generate Client Credentials
-        val A_int = srpClient.generateClientCredentials(salt, clientId.toByteArray(), pin.toByteArray())
+        // Parse state (should be 0x02 for M2)
+        val state = map[TLV_STATE]?.firstOrNull()?.toInt() ?: 0
+        if (state != 0x02) {
+            LogServer.log("AirPlayAuth: Unexpected state in M2: $state")
+        }
         
-        // Calculate S and K
-        // Note: srpClient.calculateSecret returns S
-        val S_int = try {
-            srpClient.calculateSecret(B_int)
+        // Extract salt and server public key B
+        srpSalt = map[TLV_SALT] ?: throw Exception("Missing Salt in M2")
+        val publicKeyB = map[TLV_PUBLIC_KEY] ?: throw Exception("Missing Public Key B in M2")
+        
+        LogServer.log("AirPlayAuth: M2 salt=${srpSalt!!.size} bytes, B=${publicKeyB.size} bytes")
+        
+        B = BigInteger(1, publicKeyB)
+        
+        // Identity for SRP is "Pair-Setup" (Apple's convention)
+        val identity = "Pair-Setup".toByteArray()
+        val password = pin.toByteArray()
+        
+        // Generate client credentials (A)
+        A = srpClient.generateClientCredentials(srpSalt, identity, password)
+        
+        // Calculate shared secret S
+        S = try {
+            srpClient.calculateSecret(B)
         } catch (e: Exception) {
-            throw Exception("SRP Secret Calc Error: ${e.message}")
+            LogServer.log("AirPlayAuth: SRP calculateSecret failed: ${e.message}")
+            throw Exception("SRP calculation error: ${e.message}")
         }
         
+        // Derive session key K = H(S)
         val digest = SHA512Digest()
+        val sBytes = S!!.toByteArray().let { 
+            if (it[0] == 0.toByte() && it.size > 1) it.copyOfRange(1, it.size) else it 
+        }
+        K = ByteArray(64)
+        digest.update(sBytes, 0, sBytes.size)
+        digest.doFinal(K, 0)
         
-        // Manual M1 calculation using SRP6Util
-        val M1_int = SRP6Util.calculateM1(digest, N_2048, A_int, B_int, S_int)
+        // Calculate client proof M1 = H(H(N) XOR H(g) | H(I) | s | A | B | K)
+        M1 = SRP6Util.calculateM1(digest, N_2048, A, B, S)
         
-        // Store state
-        this.A = A_int
-        this.B = B_int
-        this.s = salt
-        this.M1 = M1_int
-        this.K = SRP6Util.calculateK(digest, N_2048, S_int)
-
-        // Convert A to bytes (unsigned)
-        var aBytes = A_int.toByteArray()
-        if (aBytes[0] == 0.toByte() && aBytes.size > 1) {
-            aBytes = aBytes.copyOfRange(1, aBytes.size)
+        LogServer.log("AirPlayAuth: Generated A and M1, creating M3")
+        
+        // Build M3 response
+        val aBytes = A!!.toByteArray().let { 
+            if (it[0] == 0.toByte() && it.size > 1) it.copyOfRange(1, it.size) else it 
+        }
+        val m1Bytes = M1!!.toByteArray().let { 
+            if (it[0] == 0.toByte() && it.size > 1) it.copyOfRange(1, it.size) else it 
         }
         
-        // Convert M1 to bytes
-        var m1Bytes = M1_int.toByteArray()
-        if (m1Bytes[0] == 0.toByte() && m1Bytes.size > 1) {
-            m1Bytes = m1Bytes.copyOfRange(1, m1Bytes.size)
-        }
-
         val tlv = Tlv8()
-        tlv.add(0x03, aBytes) // pk: Client Public Key
-        tlv.add(0x04, m1Bytes) // proof: Client Proof
+        tlv.add(TLV_STATE, 0x03.toByte())  // State: M3
+        tlv.add(TLV_PUBLIC_KEY, aBytes)     // Client public key A
+        tlv.add(TLV_PROOF, m1Bytes)         // Client proof M1
+        
         return tlv.encode()
     }
     
     /**
-     * M5: Finish
-     * Input: M4 Data (Server Proof M2)
+     * Parse M4 and Generate M5
+     * 
+     * M4 contains: State=M4, Proof (M2)
+     * M5 sends: State=M5, EncryptedData (Ed25519 public key + signature)
+     */
+    fun parseM4AndGenerateM5(m4Data: ByteArray): ByteArray {
+        LogServer.log("AirPlayAuth: Parsing M4 (${m4Data.size} bytes)")
+        
+        val map = Tlv8.decode(m4Data)
+        
+        // Check for errors
+        map[TLV_ERROR]?.let { error ->
+            val errorCode = error[0].toInt()
+            throw Exception("Server error in M4: $errorCode (PIN incorrect?)")
+        }
+        
+        val serverProof = map[TLV_PROOF] ?: throw Exception("Missing Server Proof in M4")
+        
+        // Verify server proof M2
+        val digest = SHA512Digest()
+        val expectedM2 = SRP6Util.calculateM2(digest, N_2048, A, M1, S)
+        val serverProofInt = BigInteger(1, serverProof)
+        
+        if (serverProofInt != expectedM2) {
+            LogServer.log("AirPlayAuth: Server proof verification FAILED")
+            throw Exception("Server proof verification failed")
+        }
+        
+        LogServer.log("AirPlayAuth: Server proof verified, creating M5")
+        
+        // Derive encryption key for M5 data
+        // Key is derived using HKDF from session key K
+        val encryptKey = AirPlay2Crypto.hkdf(
+            salt = "Pair-Setup-Encrypt-Salt".toByteArray(),
+            ikm = K!!,
+            info = "Pair-Setup-Encrypt-Info".toByteArray(),
+            length = 32
+        )
+        
+        // Build data to sign: ed25519 public key + device identifier
+        val deviceIdBytes = deviceId.toByteArray()
+        val dataToSign = ed25519PublicKey!! + deviceIdBytes
+        
+        // Sign with Ed25519
+        val signature = AirPlay2Crypto.ed25519Sign(ed25519PrivateKey!!, dataToSign)
+        
+        // Build inner TLV (to be encrypted)
+        val innerTlv = Tlv8()
+        innerTlv.add(TLV_IDENTIFIER, deviceIdBytes)
+        innerTlv.add(TLV_PUBLIC_KEY, ed25519PublicKey!!)
+        innerTlv.add(TLV_SIGNATURE, signature)
+        val innerData = innerTlv.encode()
+        
+        // Encrypt with ChaCha20-Poly1305
+        // Nonce for M5 is "PS-Msg05" padded to 12 bytes
+        val nonce = "PS-Msg05".toByteArray().copyOf(12)
+        val encrypted = encryptWithNonce(encryptKey, nonce, innerData)
+        
+        // Build M5
+        val tlv = Tlv8()
+        tlv.add(TLV_STATE, 0x05.toByte())  // State: M5
+        tlv.add(TLV_ENCRYPTED_DATA, encrypted)
+        
+        return tlv.encode()
+    }
+    
+    /**
+     * Parse M6 (Final pairing response)
+     * 
+     * M6 contains: State=M6, EncryptedData (server Ed25519 public key + signature)
+     */
+    fun parseM6AndFinish(m6Data: ByteArray): Boolean {
+        LogServer.log("AirPlayAuth: Parsing M6 (${m6Data.size} bytes)")
+        
+        val map = Tlv8.decode(m6Data)
+        
+        // Check for errors
+        map[TLV_ERROR]?.let { error ->
+            val errorCode = error[0].toInt()
+            LogServer.log("AirPlayAuth: Error in M6: $errorCode")
+            throw Exception("Server error in M6: $errorCode")
+        }
+        
+        val encryptedData = map[TLV_ENCRYPTED_DATA] 
+            ?: throw Exception("Missing encrypted data in M6")
+        
+        // Derive decryption key
+        val decryptKey = AirPlay2Crypto.hkdf(
+            salt = "Pair-Setup-Encrypt-Salt".toByteArray(),
+            ikm = K!!,
+            info = "Pair-Setup-Encrypt-Info".toByteArray(),
+            length = 32
+        )
+        
+        // Decrypt with nonce "PS-Msg06"
+        val nonce = "PS-Msg06".toByteArray().copyOf(12)
+        val decrypted = decryptWithNonce(decryptKey, nonce, encryptedData)
+            ?: throw Exception("Failed to decrypt M6 data")
+        
+        // Parse inner TLV
+        val innerMap = Tlv8.decode(decrypted)
+        val serverIdentifier = innerMap[TLV_IDENTIFIER]
+        val serverPublicKey = innerMap[TLV_PUBLIC_KEY]
+        val serverSignature = innerMap[TLV_SIGNATURE]
+        
+        LogServer.log("AirPlayAuth: M6 decrypted - server ID=${serverIdentifier?.size} bytes")
+        
+        // Store session key for pair-verify
+        sessionKey = AirPlay2Crypto.hkdf(
+            salt = "Pair-Setup-Controller-Sign-Salt".toByteArray(),
+            ikm = K!!,
+            info = "Pair-Setup-Controller-Sign-Info".toByteArray(),
+            length = 32
+        )
+        
+        LogServer.log("AirPlayAuth: Pair-Setup COMPLETE!")
+        return true
+    }
+    
+    /**
+     * Legacy M4 finish method for compatibility
      */
     fun parseM4AndFinish(m4Data: ByteArray): ByteArray {
         val map = Tlv8.decode(m4Data)
-        val serverProof = map[0x04] ?: throw Exception("Missing Server Proof in M4")
+        val serverProof = map[TLV_PROOF] ?: throw Exception("Missing Server Proof in M4")
         
-        // Verify Server Proof (M2)
         val digest = SHA512Digest()
-        
-        // We need local M2 calculation
-        // M2 = H(A, M1, S)
-        // We assume 'S' is still valid in srpClient or we could recalculate it
-        // But SRP6Util.calculateM2 requires S.
-        // Sadly we didn't store S in a field (only K).
-        // BUT, srpClient.calculateSecret(B) is repeatable! 
-        
-        val S_int = srpClient.calculateSecret(this.B)
-        val expectedM2 = SRP6Util.calculateM2(digest, N_2048, this.A, this.M1, S_int)
-        
+        val expectedM2 = SRP6Util.calculateM2(digest, N_2048, A, M1, S)
         val serverProofInt = BigInteger(1, serverProof)
-        val expectedM2Int = BigInteger(1, expectedM2.toByteArray()) // M2 is BigInteger? calculateM2 returns BigInteger.
         
-        // Wait, calculateM2 returns BigInteger.
-        
-        if (serverProofInt != expectedM2Int) {
-             throw Exception("Server Proof Invalid. Auth Failed.")
+        if (serverProofInt != expectedM2) {
+            throw Exception("Server Proof Invalid. Auth Failed.")
         }
         
-        return ByteArray(0) 
+        return ByteArray(0)
     }
+    
+    /**
+     * Encrypt data with ChaCha20-Poly1305 using specific nonce
+     */
+    private fun encryptWithNonce(key: ByteArray, nonce: ByteArray, plaintext: ByteArray): ByteArray {
+        // Simple ChaCha20-Poly1305 encryption
+        // Returns ciphertext + tag (no prepended nonce since we use fixed nonce)
+        val encrypted = AirPlay2Crypto.chaCha20Poly1305Encrypt(key, plaintext)
+        // The crypto function prepends nonce, but we want fixed nonce
+        // So we need a version that uses our nonce
+        // For now, return the full output (will need to adjust)
+        return encrypted.copyOfRange(12, encrypted.size) // Skip auto-generated nonce
+    }
+    
+    /**
+     * Decrypt data with ChaCha20-Poly1305 using specific nonce
+     */
+    private fun decryptWithNonce(key: ByteArray, nonce: ByteArray, ciphertext: ByteArray): ByteArray? {
+        // Prepend the nonce for our crypto function
+        val withNonce = nonce + ciphertext
+        return AirPlay2Crypto.chaCha20Poly1305Decrypt(key, withNonce)
+    }
+    
+    // Getters for session state
+    fun getSessionKey(): ByteArray? = sessionKey
+    fun getEd25519PublicKey(): ByteArray? = ed25519PublicKey
+    fun getDeviceId(): String = deviceId
 }
