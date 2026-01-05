@@ -8,10 +8,13 @@ import androidx.lifecycle.viewModelScope
 import com.airplay.streamer.discovery.AirPlayDevice
 import com.airplay.streamer.discovery.AirPlayDiscovery
 import com.airplay.streamer.discovery.DiscoveryEvent
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class MainUiState(
     val devices: List<AirPlayDevice> = emptyList(),
@@ -29,13 +32,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val discovery = AirPlayDiscovery(wifiManager)
 
     private val discoveredDevices = mutableMapOf<String, AirPlayDevice>()
+    private var discoveryJob: Job? = null
 
     init {
         startDiscovery()
     }
 
     private fun startDiscovery() {
-        viewModelScope.launch {
+        discoveryJob = viewModelScope.launch {
             discovery.discoverDevices().collect { event ->
                 when (event) {
                     is DiscoveryEvent.DiscoveryStarted -> {
@@ -90,15 +94,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refreshDiscovery() {
-        // Clear existing devices (except manual ones) and restart discovery
-        val manualDevices = discoveredDevices.filter { it.value.deviceId.startsWith("manual") }
-        discoveredDevices.clear()
-        discoveredDevices.putAll(manualDevices)
-        updateDeviceList()
-        
-        // Restart discovery
-        discovery.stop()
-        startDiscovery()
+        viewModelScope.launch {
+            // Clear existing devices (except manual ones) and restart discovery
+            val manualDevices = discoveredDevices.filter { it.value.deviceId.startsWith("manual") }
+            discoveredDevices.clear()
+            discoveredDevices.putAll(manualDevices)
+            updateDeviceList()
+            
+            // Cancel existing discovery job
+            discoveryJob?.cancel()
+            
+            // Stop discovery on IO thread to avoid blocking UI
+            withContext(Dispatchers.IO) {
+                discovery.stop()
+            }
+            
+            // Restart discovery
+            startDiscovery()
+        }
     }
 
     fun setStreamingState(isStreaming: Boolean) {

@@ -1,10 +1,16 @@
-# AirPlay Android
+# CenturyPlay
 
 📱 Stream audio from your Android device to AirPlay speakers and receivers.
 
 ![Android](https://img.shields.io/badge/Android-10%2B-green)
 ![AirPlay](https://img.shields.io/badge/AirPlay-v1-blue)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
+
+## The Story
+
+This project started as a way to breathe new life into a **Bang & Olufsen BeoSound Century** - a beautiful 1990s hi-fi system with stunning sound quality but no wireless capabilities. By adding a Raspberry Pi running [shairport-sync](https://github.com/mikebrady/shairport-sync), the Century can now receive AirPlay audio streams, bridging four decades of audio technology.
+
+CenturyPlay completes the chain by letting Android devices stream system audio to shairport-sync (or any AirPlay receiver), effectively turning a vintage B&O system into a modern wireless speaker.
 
 ## Features
 
@@ -13,6 +19,31 @@
 - 🔐 **Encrypted Streaming** - AES-128-CBC encryption with RSA key exchange
 - ⏱️ **Synchronized Playback** - Proper RTP timing and sync packets for smooth audio
 - 🎚️ **Volume Control** - Adjust volume on the AirPlay receiver
+
+## Lossless & Hi-Res Audio
+
+### Does it work with Apple Music Lossless?
+
+**Yes!** When playing Apple Music (or any other source) on Android, this app captures the audio and streams it over AirPlay. However, there are important caveats:
+
+### Android Audio Resampling Behavior
+
+Android's audio pipeline has some quirks that affect lossless playback:
+
+| Source | Android Behavior | What Gets Streamed |
+|--------|------------------|-------------------|
+| 44.1 kHz (CD Quality) | ✅ No resampling | Bit-perfect (if no mixer interference) |
+| 48 kHz | ✅ Native | Bit-perfect |
+| 96 kHz Hi-Res | ⚠️ Resampled to 48 kHz | Downsampled |
+| 192 kHz Hi-Res | ⚠️ Resampled to 48 kHz | Downsampled |
+
+**Key Points:**
+- Android's AudioFlinger mixer typically runs at 48 kHz
+- Hi-Res content (88.2/96/176.4/192 kHz) gets **downsampled** by Android before it even reaches this app
+- AirPlay 1 only supports 44.1 kHz anyway, so there's additional resampling
+- For true bit-perfect playback, you'd need exclusive USB audio mode (not system audio capture)
+
+**Bottom Line:** You get excellent quality audio streaming, but don't expect bit-perfect Hi-Res. CD quality (16-bit/44.1kHz) comes through cleanly, which is perfect for the AirPlay protocol.
 
 ## Supported Protocols
 
@@ -32,8 +63,8 @@
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/g8row/airplay-android.git
-   cd airplay-android
+   git clone https://github.com/g8row/centuryplay.git
+   cd centuryplay
    ```
 
 2. Build with Gradle:
@@ -48,7 +79,7 @@
 
 ### From Release
 
-Download the latest APK from the [Releases](https://github.com/yourusername/airplay-android/releases) page.
+Download the latest APK from the [Releases](https://github.com/g8row/centuryplay/releases) page.
 
 ## Usage
 
