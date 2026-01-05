@@ -20,7 +20,13 @@
     <string name="settings_title">Settings</string>
     <string name="protocol_preference">Protocol Preference</string>
     <string name="protocol_preference_summary">Choose which AirPlay version to use</string>
+    
+    <!-- Debug mode -->
+    <string name="debug_mode">Debug Mode</string>
+    <string name="debug_mode_summary">Enable advanced options for development</string>
     <string name="manual_connect">Manual Connect</string>
     <string name="manual_connect_title">Manual Connection</string>
     <string name="manual_connect_hint">Enter IP:Port (e.g. 192.168.1.100:5000)</string>
+    <string name="manual_connect_description">Connect to a device not discovered via mDNS</string>
+    <string name="save_manual_device">Save Device</string>
 </resources>

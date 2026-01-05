@@ -83,6 +83,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun addManualDevice(device: AirPlayDevice) {
+        val key = "${device.host}:${device.port}"
+        discoveredDevices[key] = device
+        updateDeviceList()
+    }
+
     fun setStreamingState(isStreaming: Boolean) {
         _uiState.value = _uiState.value.copy(isStreaming = isStreaming)
     }

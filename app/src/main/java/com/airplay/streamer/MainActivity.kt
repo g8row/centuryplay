@@ -94,6 +94,38 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        checkForManualDevice()
+    }
+
+    private fun checkForManualDevice() {
+        val prefs = getSharedPreferences(SettingsActivity.PREFS_NAME, MODE_PRIVATE)
+        val hasPending = prefs.getBoolean("manual_device_pending", false)
+        
+        if (hasPending) {
+            val host = prefs.getString("manual_device_host", null)
+            val port = prefs.getInt("manual_device_port", 5000)
+            
+            if (host != null) {
+                val device = AirPlayDevice(
+                    name = "Manual: $host",
+                    host = host,
+                    port = port,
+                    deviceId = "manual_$host",
+                    protocolVersion = if (port == 7000) 2 else 1
+                )
+                viewModel.addManualDevice(device)
+                viewModel.selectDevice(device)
+                
+                // Clear the pending flag
+                prefs.edit().putBoolean("manual_device_pending", false).apply()
+                
+                Toast.makeText(this, "Manual device added: $host:$port", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     private fun setupWindowInsets() {
         // Apply insets to header for status bar
         ViewCompat.setOnApplyWindowInsetsListener(binding.header) { view, windowInsets ->
@@ -145,55 +177,6 @@ class MainActivity : AppCompatActivity() {
             if (fromUser) {
                 // Volume changes will be implemented when streaming is active
             }
-        }
-        
-        // FAB for manual connection
-        binding.fabManualConnect.setOnClickListener {
-            showManualConnectDialog()
-        }
-    }
-    
-    private fun showManualConnectDialog() {
-        val editText = android.widget.EditText(this).apply {
-            hint = getString(R.string.manual_connect_hint)
-            setText("192.168.1.216:5000") // Pre-fill with PC's shairport address
-            inputType = android.text.InputType.TYPE_CLASS_TEXT
-            setPadding(48, 32, 48, 32)
-        }
-        
-        com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
-            .setTitle(R.string.manual_connect_title)
-            .setView(editText)
-            .setPositiveButton("Connect") { _, _ ->
-                val input = editText.text.toString().trim()
-                parseAndConnect(input)
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-    
-    private fun parseAndConnect(input: String) {
-        try {
-            val parts = input.split(":")
-            if (parts.size != 2) {
-                Toast.makeText(this, "Invalid format. Use IP:Port", Toast.LENGTH_SHORT).show()
-                return
-            }
-            val host = parts[0]
-            val port = parts[1].toIntOrNull() ?: throw NumberFormatException()
-            
-            // Create a manual device and select it
-            val device = com.airplay.streamer.discovery.AirPlayDevice(
-                name = "Manual: $host",
-                host = host,
-                port = port,
-                deviceId = "manual",
-                protocolVersion = if (port == 7000) 2 else 1
-            )
-            viewModel.selectDevice(device)
-            Toast.makeText(this, "Selected $host:$port - tap Stream to connect", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            Toast.makeText(this, "Invalid input: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 

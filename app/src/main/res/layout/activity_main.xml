@@ -281,17 +281,4 @@
             </com.google.android.material.card.MaterialCardView>
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>
-
-    <!-- FAB for manual connection -->
-    <com.google.android.material.floatingactionbutton.FloatingActionButton
-        android:id="@+id/fabManualConnect"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom|end"
-        android:layout_marginEnd="24dp"
-        android:layout_marginBottom="120dp"
-        android:contentDescription="@string/manual_connect"
-        app:srcCompat="@drawable/ic_add"
-        app:tint="?attr/colorOnPrimaryContainer"
-        app:backgroundTint="?attr/colorPrimaryContainer"/>
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

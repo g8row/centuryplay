@@ -32,7 +32,7 @@
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/airplay-android.git
+   git clone https://github.com/g8row/airplay-android.git
    cd airplay-android
    ```
 

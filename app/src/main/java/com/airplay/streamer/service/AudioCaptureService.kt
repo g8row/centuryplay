@@ -27,6 +27,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 /**
  * Foreground service that captures system audio using MediaProjection/AudioPlaybackCapture
@@ -342,20 +343,22 @@ class AudioCaptureService : Service() {
         }
         audioRecord = null
 
-        // Disconnect clients synchronously (don't use coroutine here to avoid race conditions)
-        try {
-            raopClient?.disconnect()
-        } catch (e: Exception) {
-            LogServer.log("Error disconnecting RAOP client: ${e.message}")
+        // Disconnect clients synchronously using runBlocking
+        runBlocking {
+            try {
+                raopClient?.disconnect()
+            } catch (e: Exception) {
+                LogServer.log("Error disconnecting RAOP client: ${e.message}")
+            }
+            raopClient = null
+            
+            try {
+                airPlay2Client?.disconnect()
+            } catch (e: Exception) {
+                LogServer.log("Error disconnecting AirPlay2 client: ${e.message}")
+            }
+            airPlay2Client = null
         }
-        raopClient = null
-        
-        try {
-            airPlay2Client?.disconnect()
-        } catch (e: Exception) {
-            LogServer.log("Error disconnecting AirPlay2 client: ${e.message}")
-        }
-        airPlay2Client = null
 
         // Stop MediaProjection - this MUST be called to stop screen sharing indicator
         try {

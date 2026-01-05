@@ -7,22 +7,22 @@
     
     <!-- Android head body (rounded rectangle) -->
     <path
-        android:fillColor="#FFFFFF"
+        android:fillColor="#000000"
         android:pathData="M38,58 L38,72 Q38,76 42,76 L66,76 Q70,76 70,72 L70,58 Q70,48 54,48 Q38,48 38,58 Z"/>
     
-    <!-- Left eye -->
+    <!-- Left eye (cutout) -->
     <path
-        android:fillColor="#000000"
+        android:fillColor="#FFFFFF"
         android:pathData="M45,60 A2,2 0 1,1 45,60.01"/>
     
-    <!-- Right eye -->
+    <!-- Right eye (cutout) -->
     <path
-        android:fillColor="#000000"
+        android:fillColor="#FFFFFF"
         android:pathData="M63,60 A2,2 0 1,1 63,60.01"/>
     
     <!-- Left antenna -->
     <path
-        android:strokeColor="#FFFFFF"
+        android:strokeColor="#000000"
         android:strokeWidth="2.5"
         android:strokeLineCap="round"
         android:fillColor="#00000000"
@@ -30,7 +30,7 @@
     
     <!-- Right antenna -->
     <path
-        android:strokeColor="#FFFFFF"
+        android:strokeColor="#000000"
         android:strokeWidth="2.5"
         android:strokeLineCap="round"
         android:fillColor="#00000000"
@@ -38,21 +38,21 @@
     
     <!-- AirPlay broadcast waves (concentric arcs) -->
     <path
-        android:strokeColor="#FFFFFF"
+        android:strokeColor="#000000"
         android:strokeWidth="2.5"
         android:strokeLineCap="round"
         android:fillColor="#00000000"
         android:pathData="M44,36 Q54,28 64,36"/>
     
     <path
-        android:strokeColor="#FFFFFF"
+        android:strokeColor="#000000"
         android:strokeWidth="2.5"
         android:strokeLineCap="round"
         android:fillColor="#00000000"
         android:pathData="M38,32 Q54,20 70,32"/>
     
     <path
-        android:strokeColor="#FFFFFF"
+        android:strokeColor="#000000"
         android:strokeWidth="2.5"
         android:strokeLineCap="round"
         android:fillColor="#00000000"
