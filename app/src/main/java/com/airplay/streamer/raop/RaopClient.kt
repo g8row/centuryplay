@@ -577,9 +577,6 @@ class RaopClient(
         
         Thread {
             try {
-                val socket = rtspSocket
-                val reader = rtspReader
-                
                 while (isHealthMonitorRunning.get() && isConnected.get()) {
                     Thread.sleep(HEALTH_CHECK_INTERVAL_MS)
                     
@@ -593,21 +590,28 @@ class RaopClient(
                         break
                     }
                     
-                    // Try to check if socket is still alive by checking input stream
-                    // If server closed connection, socket.isConnected() may still return true
-                    // but reading will fail
+                    // The most reliable way to detect if the server closed the connection
+                    // is to actually try to read from the socket with a short timeout
+                    // If server closed, read() returns -1 (EOF) or throws an exception
                     try {
                         currentSocket.soTimeout = 100  // Very short timeout
-                        // Check if there's data or if the connection is closed
-                        // If the server closed, this will throw or return -1
                         val inputStream = currentSocket.getInputStream()
-                        val available = inputStream.available()
-                        // If available > 0, there's unexpected data (server sent something)
-                        // That's actually fine, we just want to make sure the socket is alive
-                        logD("Health check: socket OK, available=$available")
+                        
+                        // Actually try to read - this is the key difference
+                        // read() will return -1 if the server has closed the connection
+                        val result = inputStream.read()
+                        if (result == -1) {
+                            logE("Health check: Server closed connection (EOF received)")
+                            handleServerDisconnect()
+                            break
+                        } else {
+                            // We got unexpected data from the server
+                            // This is fine, might be an async notification
+                            logD("Health check: Received data from server: $result")
+                        }
                     } catch (e: java.net.SocketTimeoutException) {
-                        // Timeout is expected and fine - means socket is still alive
-                        logD("Health check: socket OK (timeout expected)")
+                        // Timeout is expected and fine - means socket is still alive but no data
+                        logD("Health check: socket OK (timeout, no data)")
                     } catch (e: java.io.IOException) {
                         logE("Health check: socket read failed - ${e.message}")
                         handleServerDisconnect()

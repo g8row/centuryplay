@@ -183,6 +183,27 @@ class AudioCaptureService : Service() {
                 // AirPlay 1 (RAOP) Path
                 LogServer.log("Starting AirPlay 1 (RAOP) connection to $host:$port")
                 raopClient = RaopClient(host, port)
+                
+                // Set callback to handle server disconnects
+                raopClient?.callback = object : RaopClient.StreamingCallback {
+                    override fun onConnected() {
+                        LogServer.log("RAOP callback: Connected")
+                    }
+                    
+                    override fun onDisconnected() {
+                        LogServer.log("RAOP callback: Server disconnected - stopping service")
+                        // Post to main thread to stop the service
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            stopCapture()
+                            stopSelf()
+                        }
+                    }
+                    
+                    override fun onError(error: String) {
+                        LogServer.log("RAOP callback: Error - $error")
+                    }
+                }
+                
                 val connected = raopClient?.connect() ?: false
 
                 if (!connected) {
@@ -299,27 +320,59 @@ class AudioCaptureService : Service() {
     }
 
     private fun stopCapture() {
+        LogServer.log("stopCapture() called - cleaning up")
+        
+        // Set flag first to stop loops
         isCapturing = false
+        
+        // Cancel the capture job
         captureJob?.cancel()
         captureJob = null
 
-        audioRecord?.stop()
-        audioRecord?.release()
+        // Stop and release audio record
+        try {
+            audioRecord?.stop()
+        } catch (e: Exception) {
+            LogServer.log("Error stopping audioRecord: ${e.message}")
+        }
+        try {
+            audioRecord?.release()
+        } catch (e: Exception) {
+            LogServer.log("Error releasing audioRecord: ${e.message}")
+        }
         audioRecord = null
 
-        serviceScope.launch {
+        // Disconnect clients synchronously (don't use coroutine here to avoid race conditions)
+        try {
             raopClient?.disconnect()
-            raopClient = null
-            
-            airPlay2Client?.disconnect()
-            airPlay2Client = null
+        } catch (e: Exception) {
+            LogServer.log("Error disconnecting RAOP client: ${e.message}")
         }
+        raopClient = null
+        
+        try {
+            airPlay2Client?.disconnect()
+        } catch (e: Exception) {
+            LogServer.log("Error disconnecting AirPlay2 client: ${e.message}")
+        }
+        airPlay2Client = null
 
-        mediaProjection?.stop()
+        // Stop MediaProjection - this MUST be called to stop screen sharing indicator
+        try {
+            mediaProjection?.stop()
+            LogServer.log("MediaProjection stopped")
+        } catch (e: Exception) {
+            LogServer.log("Error stopping MediaProjection: ${e.message}")
+        }
         mediaProjection = null
 
+        // Notify UI
         onStateChanged?.invoke(false)
+        
+        // Remove foreground notification
         stopForeground(STOP_FOREGROUND_REMOVE)
+        
+        LogServer.log("stopCapture() complete")
     }
 
     private fun createNotificationChannel() {
