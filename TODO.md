@@ -137,11 +137,28 @@
 4. ✅ Implement HKDF key derivation
 5. ✅ Implement ChaCha20-Poly1305 AEAD
 
-### Phase 2: Pairing Flow ⬅️ IN PROGRESS
-1. ✅ Update AirPlayAuth with proper M1-M6 flow
-2. [ ] Test against real AirPlay 2 device
-3. [ ] Handle PIN entry UI
+### Phase 2: Pairing Flow ✅ DONE (Transient)
+1. ✅ Update AirPlayAuth with proper M1-M4 flow (transient)
+2. ✅ Test against shairport-sync - pairing works!
+3. [ ] Handle PIN entry UI (for non-transient)
 4. [ ] Store paired device credentials persistently
+
+### Phase 2.5: PTP Timing ⬅️ IN PROGRESS (CRITICAL)
+> See [docs/PTP_INVESTIGATION.md](docs/PTP_INVESTIGATION.md) for details
+
+NQPTP requires proper PTP packets from the sender to establish timing.
+Current issues:
+1. [/] Verify ANNOUNCE packet format matches NQPTP expectations
+2. [ ] Ensure ANNOUNCE precedes SYNC/FOLLOW_UP
+3. [ ] Fix port binding (need 319/320 source ports, requires root)
+4. [ ] Test with verbose NQPTP logging (`nqptp -vvv`)
+5. [ ] Verify preciseOriginTimestamp in FOLLOW_UP is correct
+
+Key findings from NQPTP source (`nqptp-message-handlers.c`):
+- **Critical**: NQPTP discards SYNC/FOLLOW_UP until ANNOUNCE establishes clock ID
+- Header format must match `ptp_common_message_header` exactly
+- Apple uses transportSpecific=0x1 (802.1AS/gPTP profile)
+- logMessagePeriod: 0xFD (-3) for Sync = 125ms interval
 
 ### Phase 3: Streaming
 1. [ ] Implement pair-verify for reconnection
