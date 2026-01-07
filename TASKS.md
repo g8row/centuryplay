@@ -1,0 +1,15 @@
+- [x] Research and Analysis
+    - [x] Explore codebase structure and existing documentation
+    - [x] Read and understand Python test scripts (especially `airplay2_transient.py`)
+    - [x] Read `docs` related to AirPlay v2 and PTP
+    - [x] Check `nqptp` and `shairport-sync` information/sources if available
+- [/] Reproduction
+    - [/] Run `airplay2_transient.py` from `agl` to `shairport-sync`
+    - [/] Capture and analyze `nqptp` and `shairport` logs
+- [ ] Fix Implementation
+    - [ ] Identify the specific PTP packet issue
+    - [ ] Modify the Python script or Kotlin app to correct the protocol behavior
+    - [ ] Verify the fix
+- [ ] Documentation
+    - [ ] Update `docs` with findings
+    - [ ] Save relevant info to `todo` and `.github` as requested
