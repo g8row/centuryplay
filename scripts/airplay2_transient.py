@@ -923,10 +923,15 @@ class AirPlay2Client:
             seq_id = 0
             announce_seq = 0
             
+            # Use MONOTONIC time for PTP timestamps!
+            # NQPTP uses CLOCK_MONOTONIC for reception_time, so our PTP time must match
+            # iPhone uses monotonic-style time (~3237 sec), not Unix epoch (~56 years)
+            
             while self._ptp_running:
                 try:
-                    # Get current timestamp in nanoseconds
-                    now_ns = time.time_ns()
+                    # Get current timestamp as MONOTONIC nanoseconds
+                    # This matches NQPTP's CLOCK_MONOTONIC reception_time
+                    now_ns = time.monotonic_ns()
                     
                     # Send Announce (every ~1 second, so every 8th message)
                     if seq_id % 8 == 0:
@@ -941,6 +946,7 @@ class AirPlay2Client:
                     self._ptp_sock_319.sendto(sync, target_319)
                     
                     # Send Follow_Up immediately after Sync (on port 320 general port)
+                    # Use MONOTONIC time to match NQPTP's CLOCK_MONOTONIC
                     follow_up = build_follow_up_message(seq_id, now_ns)
                     self._ptp_sock_320.sendto(follow_up, target_320)
                     
@@ -1212,10 +1218,10 @@ class AirPlay2Client:
         setup_body = {
             "streams": [
                 {
-                    "audioFormat": 0x800,  # AAC-ELD
+                    "audioFormat": 0x40000,  # ALAC (262144) - Correct for AirPlay 2
                     "audioMode": "default",
                     "controlPort": control_port,
-                    "ct": 1,  # Raw PCM
+                    "ct": 2,  # Compression Type 2 (ALAC)
                     "isMedia": True,
                     "latencyMax": 88200,
                     "latencyMin": 11025,
@@ -1223,7 +1229,7 @@ class AirPlay2Client:
                     "spf": 352,  # Samples Per Frame
                     "sr": 44100,  # Sample rate
                     "type": 0x60,  # Audio stream
-                    "supportsDynamicStreamID": False,
+                    "supportsDynamicStreamID": True,
                     "streamConnectionID": self.cseq,
                 }
             ]
@@ -1298,183 +1304,359 @@ class AirPlay2Client:
             print("FLUSH OK")
         
         return True
-    
+
+    def set_volume(self, volume_db: float = 0.0):
+        """Send SET_PARAMETER to set volume (0.0 is max, -30.0 is typical low)."""
+        print(f"\n{'='*60}")
+        print(f"Step 9: SET_VOLUME to {volume_db}dB")
+        print(f"{'='*60}")
+        
+        content = f"volume: {volume_db}\r\n".encode('utf-8')
+        
+        status, headers, body = self.send_rtsp(
+            "SET_PARAMETER", f"rtsp://{self.host}/{self.session_uuid}",
+            content_type="text/parameters",
+            body=content
+        )
+        
+        if status != 200:
+            print(f"SET_VOLUME failed: {status} (non-fatal)")
+        else:
+            print("SET_VOLUME OK")
+        
+        return True
+
+    # --------------------------------------------------------------------------
+    # ALAC Encoding Helper (for "Uncompressed" ALAC Frames)
+    # --------------------------------------------------------------------------
+    def generate_alac_payloads(self, duration: float) -> list[bytes]:
+        """Generate ALAC payloads using ffmpeg via CAF file."""
+        import subprocess
+        import os
+        import struct
+        
+        filename = "/tmp/airplay_test.caf"
+        
+        # 2. Run ffmpeg to generate sine wave -> ALAC -> CAF
+        # -t duration
+        # -c:a alac (encode to ALAC)
+        # -f caf
+        
+        cmd = [
+            'ffmpeg', '-y',
+            '-f', 'lavfi',
+            '-i', f'sine=f=440:r=44100',
+            '-t', str(duration),
+            '-c:a', 'alac',
+            '-f', 'caf',
+            filename
+        ]
+        
+        print(f"  [FFmpeg] Generating {duration}s ALAC audio to {filename}...")
+        # Capture stdout/stderr for debug if needed, but devnull is fine if we check retcode
+        ret = subprocess.call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if ret != 0:
+            print("  [FFmpeg] Error generating audio! Try running ffmpeg manually.")
+            return []
+            
+        # 3. Parse CAF file
+        payloads = []
+        try:
+            with open(filename, 'rb') as f:
+                # Header
+                magic = f.read(4)
+                if magic != b'caff':
+                    print("  [CAF] Invalid magic")
+                    return []
+                f.read(4) # Version + Flags
+                
+                data_blob = b''
+                packet_sizes = []
+                
+                while True:
+                    chunk_type = f.read(4)
+                    if not chunk_type: break
+                    chunk_size = struct.unpack('>q', f.read(8))[0]
+                    
+                    if chunk_type == b'data':
+                        # Skip 4 bytes edit count
+                        f.read(4)
+                        data_blob = f.read(chunk_size - 4)
+                    elif chunk_type == b'pakt':
+                        pakt_start = f.tell()
+                        num_packets = struct.unpack('>Q', f.read(8))[0]
+                        f.read(16) # Valid(8) + Priming(4) + Remainder(4)
+                        
+                        # Read variable ints
+                        # We read the rest of the chunk
+                        bytes_left = chunk_size - 24
+                        table_data = f.read(bytes_left)
+                        
+                        offset = 0
+                        for _ in range(num_packets):
+                            if offset >= len(table_data): break
+                            val = 0
+                            while True:
+                                b = table_data[offset]
+                                offset += 1
+                                val = (val << 7) | (b & 0x7F)
+                                if not (b & 0x80):
+                                    break
+                            packet_sizes.append(val)
+                    else:
+                        f.seek(chunk_size, 1) # Skip
+                
+                # Now slice data_blob using packet_sizes
+                print(f"  [CAF] Found {len(packet_sizes)} packets in pakt, blob size {len(data_blob)}")
+                
+                # If no pakt found (ffmpeg streaming mode?), try to deduce?
+                # But ffmpeg file output should have pakt.
+                
+                offset = 0
+                for sz in packet_sizes:
+                    if offset + sz > len(data_blob):
+                        print("  [CAF] Buffer underflow during slicing!")
+                        break
+                    frame = data_blob[offset:offset+sz]
+                    payloads.append(frame)
+                    offset += sz
+                    
+        except Exception as e:
+            print(f"  [CAF] Parsing error: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # Cleanup
+        if os.path.exists(filename):
+            os.remove(filename)
+            
+        print(f"  [CAF] Extracted {len(payloads)} ALAC frames")
+        return payloads
+
     def send_audio_packets(self, duration_sec: float = 5.0):
-        """
-        Send test audio packets (sine wave) to verify audio streaming works.
-        Uses ChaCha20-Poly1305 encryption with the shared key (shk).
-        
-        PTP timing is handled by the PTP master clock daemon started in setup_event_channel.
-        
-        Audio packet format (based on pyatv airplayv2.py):
-        - RTP header (12 bytes): [proto:1][type:1][seq:2][timestamp:4][ssrc:4]
-        - Encrypted audio + auth tag (16 bytes)
-        - 8-byte nonce (appended to packet)
-        
-        AAD = rtp_header[4:12] (timestamp + ssrc)
-        """
-        import math
-        import time
-        import threading
-        from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
-        
-        if not self.audio_data_port or not self.audio_shared_secret:
-            print("Audio stream not set up!")
+        """Send generated audio packets over UDP."""
+        if not hasattr(self, 'audio_data_port') or not hasattr(self, 'audio_shared_secret'):
+            print("Audio stream not setup! Call setup_audio_stream() first.")
             return
+
+        print(f"\n{'='*60}")
+        print("Step 9: Stream Audio (ALAC Encrypted)")
+        print(f"{'='*60}")
         
-        # Start a thread to keep the TCP connection alive by reading any incoming data
+        import threading
+
+        # Setup sockets
+        audio_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        ctrl_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        
+        # Start the TCP feedback listener (if not already running/needed)
         self._keep_tcp_alive = True
-        def tcp_reader():
-            """Read any incoming data from the RTSP TCP socket to keep it alive."""
-            while self._keep_tcp_alive:
-                try:
-                    # Use select to check if there's data to read
-                    ready, _, _ = select.select([self.sock], [], [], 0.5)
-                    if ready:
+        def keep_tcp_alive():
+            try:
+                while self._keep_tcp_alive:
+                    ready = select.select([self.sock], [], [], 1.0)
+                    if ready[0]:
                         data = self.sock.recv(4096)
-                        if data:
-                            print(f"  [TCP] Received {len(data)} bytes")
-                except Exception as e:
-                    if self._keep_tcp_alive:
-                        print(f"  [TCP] Reader error: {e}")
-                    break
+                        if not data:
+                            break
+            except:
+                pass
         
-        tcp_thread = threading.Thread(target=tcp_reader, daemon=True)
+        tcp_thread = threading.Thread(target=keep_tcp_alive, daemon=True)
         tcp_thread.start()
         
-        print(f"\n{'='*60}")
-        print(f"Streaming {duration_sec}s of test audio (440Hz sine wave)")
-        print(f"{'='*60}")
-        print(f"Target: {self.host}:{self.audio_data_port}")
-        if self.audio_control_port:
-            print(f"Control port: {self.audio_control_port}")
-        print(f"PTP clock running: {self._ptp_running if hasattr(self, '_ptp_running') else False}")
+        # Helper to send Anchor Packet (Type 215/0xD7) to Control Port
+        # This is the CORRECT format for AirPlay 2 as per shairport-sync rtp.c
+        # Maps RTP Timestamp <-> PTP Time (Network Time)
+        #
+        # Packet format (28 bytes minimum):
+        #   Byte 0: 0x10 bit set for sentinel (first packet indicator)
+        #   Byte 1: 0xD7 (215) - packet type for anchor/timing
+        #   Bytes 2-3: Sequence number (unused?)
+        #   Bytes 4-7: frame_1 (uint32) - RTP timestamp with latency (77175 frames)
+        #   Bytes 8-15: remote_packet_time_ns (uint64) - PTP network time in nanoseconds
+        #   Bytes 16-19: frame_2 (uint32) - RTP timestamp (the frame the time refers to)
+        #   Bytes 20-27: clock_id (uint64) - PTP clock ID
+        #
+        anchor_packet_seq = 0
+        def send_anchor_packet(rtp_ts, ptp_time_ns, clock_id_bytes, is_sentinel=False):
+            nonlocal anchor_packet_seq
+            
+            # Standard latency offset used by iPhone (77175 frames)
+            LATENCY_FRAMES = 77175
+            
+            packet = bytearray(28)
+            
+            # Byte 0: 0x80 (V=2) | 0x10 if sentinel
+            packet[0] = 0x80 | (0x10 if is_sentinel else 0x00)
+            
+            # Byte 1: Type 215 (0xD7)
+            packet[1] = 0xD7
+            
+            # Bytes 2-3: Sequence number (big-endian)
+            struct.pack_into('>H', packet, 2, anchor_packet_seq & 0xFFFF)
+            anchor_packet_seq += 1
+            
+            # Bytes 4-7: frame_1 = frame_2 + LATENCY_FRAMES (the RTP with latency included)
+            frame_2 = rtp_ts & 0xFFFFFFFF
+            frame_1 = (frame_2 + LATENCY_FRAMES) & 0xFFFFFFFF
+            struct.pack_into('>I', packet, 4, frame_1)
+            
+            # Bytes 8-15: remote_packet_time_ns (PTP time in nanoseconds, big-endian uint64)
+            struct.pack_into('>Q', packet, 8, int(ptp_time_ns))
+            
+            # Bytes 16-19: frame_2 (the RTP timestamp the time refers to)
+            struct.pack_into('>I', packet, 16, frame_2)
+            
+            # Bytes 20-27: clock_id (our PTP clock ID as uint64, big-endian)
+            # clock_id_bytes should be the 8-byte hex clock ID we use for PTP
+            if isinstance(clock_id_bytes, str):
+                clock_id_int = int(clock_id_bytes, 16)
+            elif isinstance(clock_id_bytes, bytes):
+                clock_id_int = int.from_bytes(clock_id_bytes, 'big')
+            else:
+                clock_id_int = clock_id_bytes
+            struct.pack_into('>Q', packet, 20, clock_id_int)
+            
+            ctrl_sock.sendto(packet, (self.host, self.audio_control_port))
+            if is_sentinel:
+                print(f"  [Anchor] Sent SENTINEL anchor: RTP={frame_2}, PTP_ns={ptp_time_ns}, ClockID={clock_id_int:016x}")
+
+        # Sync Loop Thread
+        self._keep_sync_alive = True
+        def sync_loop():
+            local_seq = 0
+            while self._keep_sync_alive:
+                now = time.time()
+                # Calculate corresponding RTP time for 'now'
+                # RTP = StartRTP + (Now - StartTime) * Rate
+                # We need accurate mapping. 
+                # self._start_rtptime corresponds to... when?
+                # We didn't save a _start_walltime.
+                # Let's use current estimated RTP time based on stream progress?
+                # Better: Define Anchor NOW.
+                
+                # We need to map [Current PTP] to [Current RTP]
+                # In send_audio_packets loop, we are essentially defining the mapping.
+                pass
+                time.sleep(1.0)
         
-        # Create UDP socket for audio data
-        audio_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # We need to run sync sending inside the send_audio_packets loop 
+        # or in parallel, but using the same clock source.
         
-        # Audio parameters (matching pyatv)
+        # Generate ALAC packets via ffmpeg
+        alac_frames = self.generate_alac_payloads(duration_sec)
+        
+        if not alac_frames:
+            print("Error: No ALAC frames generated!")
+            return
+
+        # Prepare encryption
+        # Key: shared_secret from SETUP (self.audio_shared_secret)
+        cipher = Chacha20Cipher(self.audio_shared_secret, self.audio_shared_secret) 
+        
+        # Sequencing
+        # Use valid RTP sequence and timestamp
+        sequence_number = getattr(self, '_start_rtpseq', random.randint(0, 65535))
+        rtp_time = getattr(self, '_start_rtptime', 0) & 0xFFFFFFFF
+        
+        # Audio params
         sample_rate = 44100
-        samples_per_frame = 352  # FRAMES_PER_PACKET
-        frequency = 440  # Hz (A4 note)
+        # ALAC frame size is typically 352 or 4096 depending on encoder.
+        # ffmpeg usually does 4096 for default ALAC.
+        # We should increment timestamp by the number of samples in the frame.
+        # How do we know samples per frame?
+        # ALAC frames are variable size in bytes, but fixed in samples usually.
+        # Standard ALAC is 4096 samples per frame.
+        samples_per_frame = 4096 # Standard for ALAC
+        frame_duration_ns = int((samples_per_frame / sample_rate) * 1_000_000_000)  # Frame duration in nanoseconds
         
-        # The shared key (shk) IS the audio encryption key for ChaCha20-Poly1305
-        audio_key = self.audio_shared_secret
-        print(f"Audio key (shk): {audio_key.hex()[:32]}...")
+        start_time_ns = time.time_ns() - 2_000_000_000  # Pre-fill buffer (2 seconds in ns)
+        encryption_counter = 0 # 64-bit nonce counter for ChaCha20
         
-        # Initialize ChaCha20-Poly1305 cipher with same key for both directions
-        cipher = ChaCha20Poly1305(audio_key)
+        print(f"Sending {len(alac_frames)} packets...")
         
-        frames_per_second = sample_rate // samples_per_frame
-        total_frames = int(duration_sec * frames_per_second)
-        frame_duration = 1.0 / frames_per_second
+        # Get PTP clock ID (stored during setup_event_channel / start_ptp_master)
+        ptp_clock_id = getattr(self, '_clock_id', 0)
         
-        start_time = time.time()
-        sample_index = 0
+        # Get PTP session start time for session-relative calculations
+        ptp_session_start = getattr(self, '_ptp_session_start_ns', time.time_ns())
         
-        # Use the starting sequence and timestamp from FLUSH
-        # These must match what was sent in the RTP-Info header
-        if hasattr(self, '_start_rtpseq'):
-            sequence_number = self._start_rtpseq
-        else:
-            sequence_number = random.randint(0, 65535)
+        # Send SENTINEL anchor packet BEFORE first audio packet
+        # This establishes the timing anchor for shairport-sync
+        # Use MONOTONIC time (same as PTP Follow_Up timestamps)
+        initial_ptp_ns = time.monotonic_ns()
+        initial_rtp = rtp_time
+        send_anchor_packet(initial_rtp, initial_ptp_ns, ptp_clock_id, is_sentinel=True)
         
-        if hasattr(self, '_start_rtptime'):
-            head_ts = self._start_rtptime
-        else:
-            # Fallback to NTP-based
-            def ntp_now() -> int:
-                now_us = time.time_ns() // 1000
-                seconds = now_us // 1000000
-                frac = now_us - seconds * 1000000
-                return ((seconds + 0x83AA7E80) << 32) | int((frac << 32) // 1000000)
-            def ntp2ts(ntp: int, rate: int) -> int:
-                return int((ntp >> 16) * rate) >> 16
-            head_ts = ntp2ts(ntp_now(), sample_rate)
-        
-        # Encryption counter - SEPARATE from sequence number
-        # pyatv uses an incrementing counter for the nonce
-        encryption_counter = 0
-        
-        # SSRC - use our CSeq/session ID like pyatv
-        ssrc_value = self.cseq if hasattr(self, 'cseq') else 1
-        
-        for frame_num in range(total_frames):
-            # Generate PCM samples
-            pcm_samples = []
-            for i in range(samples_per_frame):
-                t = (sample_index + i) / sample_rate
-                # Sine wave at 440Hz
-                value = int(29000 * math.sin(2 * math.pi * frequency * t))
-                pcm_samples.append((value, value))  # Same for both channels
-            sample_index += samples_per_frame
+        for i, payload in enumerate(alac_frames):
+            # RTP Header
+            # V=2, P=0, X=0, CC=0, M=1 (marker bit? usually 1 for audio?), PT=96 (dynamic)
+            # M bit is typically set on first packet of talkspurt, or maybe specific to format.
+            # shairport-sync logs showed "First packet is a sentinel packet" sometimes.
+            # Let's just set M=0 after first? Or M=1 for all?
+            # Wireshark traces for AirPlay usually show M=1 for ALAC?
+            # Let's try 0x80 (V=2) | 0x60 (PT=96). M-bit (0x80 in second byte) = 0.
+            # So second byte = 0x60 (96).
             
-            # Convert to raw PCM bytes (little-endian 16-bit stereo, interleaved)
-            # pyatv sends raw PCM with ct=1 (Raw PCM), not ALAC
-            audio_data = bytearray()
-            for left, right in pcm_samples:
-                audio_data.extend(struct.pack('<h', left))   # Left channel
-                audio_data.extend(struct.pack('<h', right))  # Right channel
-            audio_data = bytes(audio_data)
+            # RTP header: [ V(2)|P|X|CC(4) ] [ M|PT(7) ] [ Seq (16) ] [ TS (32) ] [ SSRC (32) ]
+            rtp_header = bytearray(12)
+            rtp_header[0] = 0x80 # V=2
+            rtp_header[1] = 0x60 # M=0, PT=96 (0x60 = 96)
+            # If payload type in SETUP was 96.
             
-            # Build RTP header (12 bytes total)
-            # pyatv AudioPacketHeader: proto(1), type(1), seqno(2), timestamp(4), ssrc(4)
-            first_packet = (frame_num == 0)
-            rtp_type = 0xE0 if first_packet else 0x60  # Marker bit set on first
+            struct.pack_into('>H', rtp_header, 2, sequence_number)
+            struct.pack_into('>I', rtp_header, 4, rtp_time)
+            struct.pack_into('>I', rtp_header, 8, self.cseq) # SSRC = Active-Remote or CSeq?
             
-            rtp_header = struct.pack(
-                '>BBHII',
-                0x80,  # Version 2
-                rtp_type,  # Payload type 96 (0x60), with marker bit for first
-                sequence_number & 0xFFFF,
-                head_ts & 0xFFFFFFFF,
-                ssrc_value
-            )
+            # Encryption
+            # Nonce = 4 zero bytes + 8 byte little-endian counter
+            nonce = bytearray(12) # zeros
+            struct.pack_into('<Q', nonce, 4, encryption_counter) # Little Endian counter at offset 4
             
             # AAD = rtp_header[4:12] (timestamp + ssrc) - like pyatv
-            aad = rtp_header[4:12]
+            aad = bytes(rtp_header[4:12])
             
-            # NONCE FORMAT (matching pyatv Chacha20Cipher8byteNonce):
-            # pyatv uses: 4 zero bytes + 8-byte LITTLE-ENDIAN counter
-            # The nonce format is: struct.pack("<LQ", 0, counter)
-            # This gives: \x00\x00\x00\x00 + counter as 8-byte little-endian
-            nonce_8_le = struct.pack('<Q', encryption_counter)  # 8 bytes, little-endian
-            nonce_12 = bytes(4) + nonce_8_le  # 4 zero bytes + 8 byte counter
-            
-            # Encrypt audio data with ChaCha20-Poly1305
-            encrypted = cipher.encrypt(nonce_12, audio_data, aad)
-            
-            # Increment encryption counter AFTER getting nonce (like pyatv)
+            encrypted_payload = cipher.encrypt(payload, bytes(nonce), aad)
             encryption_counter += 1
             
-            # Build final packet: rtp_header + encrypted_audio + nonce[-8:]
-            # pyatv: packet = rtp_header + audio + nonce[-8:]
-            # The last 8 bytes of nonce_12 is our little-endian counter
-            packet = rtp_header + encrypted + nonce_8_le
+            # Packet = Header + Encrypted Payload + Nonce (last 8 bytes? check spec)
+            # pyatv: rtp + encrypted + nonce(8 bytes)
+            # Confirmed by my previous reading of pyatv (Chacha20Cipher8byteNonce)
+            # but wait, does pyatv append the nonce?
+            # Yes, usually AirPlay appends the nonce or it's implicit?
+            # Looking at previous successful code: "packet = rtp_header + encrypted + nonce_8_le"
+            # Yes, append 8 byte nonce.
             
-            # Send packet
+            packet = rtp_header + encrypted_payload + nonce[4:]
+            
             audio_sock.sendto(packet, (self.host, self.audio_data_port))
             
-            sequence_number += 1
-            head_ts += samples_per_frame
+            sequence_number = (sequence_number + 1) & 0xFFFF
+            rtp_time = (rtp_time + samples_per_frame) & 0xFFFFFFFF
             
-            # Pace the packets to match real-time
-            expected_time = start_time + (frame_num + 1) * frame_duration
-            now = time.time()
-            if now < expected_time:
-                time.sleep(expected_time - now)
+            # Pacing and Sync
             
-            # Progress indicator
-            if frame_num % frames_per_second == 0:
-                print(f"  Sent {frame_num // frames_per_second + 1}s...")
-        
+            # Send Anchor packet every ~1 second (every 44100/4096≈10 packets)
+            # ALAC frame is 4096 samples approx 0.09s. So every 10 frames is ~1s.
+            if i % 10 == 0 and i > 0:
+                # Calculate current PTP time as MONOTONIC nanoseconds
+                # This matches PTP Follow_Up timestamps (same epoch)
+                anchor_ptp_ns = time.monotonic_ns()
+                send_anchor_packet(rtp_time, anchor_ptp_ns, ptp_clock_id, is_sentinel=False)
+            
+            # Pacing: calculate expected send time and wait if needed
+            expected_send_time_ns = start_time_ns + int(i * frame_duration_ns * 0.995)  # Slight speedup
+            now_ns = time.time_ns()
+            if expected_send_time_ns > now_ns:
+                time.sleep((expected_send_time_ns - now_ns) / 1_000_000_000)
+                
+            if i % 20 == 0:
+                print(f"\r  Sent {i}/{len(alac_frames)} packets", end="", flush=True)
+                
+        print("\nSending Complete.")
         audio_sock.close()
-        
-        # Stop the TCP reader thread
-        self._keep_tcp_alive = False
-        tcp_thread.join(timeout=1.0)
-        
-        print(f"Sent {total_frames} frames ({sequence_number} packets)")
+        ctrl_sock.close()
     
     def transient_pair(self) -> bool:
         """Execute full transient pairing flow."""
@@ -1615,15 +1797,22 @@ class AirPlay2Client:
         def ntp2ts(ntp: int, rate: int) -> int:
             return int((ntp >> 16) * rate) >> 16
         
+        # Audio params
         sample_rate = 44100
-        start_rtptime = ntp2ts(ntp_now(), sample_rate)
+        head_ts = ntp2ts(ntp_now(), sample_rate)
+        head_ts &= 0xFFFFFFFF
+        
+        # Encryption counter - SEPARATE from sequence number
         
         # Store for use in send_audio_packets
         self._start_rtpseq = start_rtpseq
-        self._start_rtptime = start_rtptime
+        self._start_rtptime = head_ts
         
         # Send FLUSH command with RTP-Info (like pyatv does)
-        self.flush(start_rtpseq, start_rtptime)
+        self.flush(start_rtpseq, head_ts & 0xFFFFFFFF) # Apply masking here
+        
+        # Set Volume to 0.0dB (Max) - effectively unmutes
+        self.set_volume(0.0)
         
         print("\n" + "="*60)
         print("STREAMING READY!")
@@ -1632,10 +1821,10 @@ class AirPlay2Client:
         print(f"Control port: {ctrl_port}")
         print(f"Data port: {data_port}")
         print(f"Starting RTP seq: {start_rtpseq}")
-        print(f"Starting RTP time: {start_rtptime}")
+        print(f"Starting RTP time: {head_ts}")
         
         # Stream test audio
-        self.send_audio_packets(duration_sec=5.0)
+        self.send_audio_packets(duration_sec=30.0)
         
         return True
 
