@@ -1176,7 +1176,7 @@ class AirPlay2Client:
             
             while self._ptp_running:
                 try:
-                    now_ns = time.time_ns()
+                    now_ns = time.monotonic_ns()
                     
                     # Send Announce every ~1 second (every 8th message)
                     if seq_id % 8 == 0:
@@ -1226,7 +1226,7 @@ class AirPlay2Client:
                     "latencyMax": 88200,
                     "latencyMin": 11025,
                     "shk": shared_secret,
-                    "spf": 352,  # Samples Per Frame
+                    "spf": 352,  # Samples Per Frame (Match iPhone/ffmpeg 352)
                     "sr": 44100,  # Sample rate
                     "type": 0x60,  # Audio stream
                     "supportsDynamicStreamID": True,
@@ -1347,7 +1347,9 @@ class AirPlay2Client:
             '-f', 'lavfi',
             '-i', f'sine=f=440:r=44100',
             '-t', str(duration),
+            '-t', str(duration),
             '-c:a', 'alac',
+            '-frame_size', '352', # Force AirPlay 2 standard frame size
             '-f', 'caf',
             filename
         ]
@@ -1519,8 +1521,8 @@ class AirPlay2Client:
             struct.pack_into('>Q', packet, 20, clock_id_int)
             
             ctrl_sock.sendto(packet, (self.host, self.audio_control_port))
-            if is_sentinel:
-                print(f"  [Anchor] Sent SENTINEL anchor: RTP={frame_2}, PTP_ns={ptp_time_ns}, ClockID={clock_id_int:016x}")
+            if is_sentinel or (anchor_packet_seq % 5 == 0):
+                print(f"  [Anchor] Sent Anchor: RTP={frame_2}, PTP_ns={ptp_time_ns}, ClockID={clock_id_int:016x}")
 
         # Sync Loop Thread
         self._keep_sync_alive = True
@@ -1567,8 +1569,9 @@ class AirPlay2Client:
         # We should increment timestamp by the number of samples in the frame.
         # How do we know samples per frame?
         # ALAC frames are variable size in bytes, but fixed in samples usually.
+        # ALAC frames are variable size in bytes, but fixed in samples usually.
         # Standard ALAC is 4096 samples per frame.
-        samples_per_frame = 4096 # Standard for ALAC
+        samples_per_frame = 352 # Forced in ffmpeg
         frame_duration_ns = int((samples_per_frame / sample_rate) * 1_000_000_000)  # Frame duration in nanoseconds
         
         start_time_ns = time.time_ns() - 2_000_000_000  # Pre-fill buffer (2 seconds in ns)
@@ -1583,9 +1586,9 @@ class AirPlay2Client:
         ptp_session_start = getattr(self, '_ptp_session_start_ns', time.time_ns())
         
         # Send SENTINEL anchor packet BEFORE first audio packet
-        # This establishes the timing anchor for shairport-sync
-        # Use MONOTONIC time (same as PTP Follow_Up timestamps)
-        initial_ptp_ns = time.monotonic_ns()
+        # Fix: To get positive Lead Time (e.g. 2.0s), map current RTP to FUTURE PTP.
+        # If RTP X = Now + 2s, and we send RTP X at Now, it arrives 2s early.
+        initial_ptp_ns = time.monotonic_ns() + 2_000_000_000 # 2 seconds in future
         initial_rtp = rtp_time
         send_anchor_packet(initial_rtp, initial_ptp_ns, ptp_clock_id, is_sentinel=True)
         
@@ -1599,24 +1602,31 @@ class AirPlay2Client:
             # Let's try 0x80 (V=2) | 0x60 (PT=96). M-bit (0x80 in second byte) = 0.
             # So second byte = 0x60 (96).
             
+            # SSRC: Use a fixed/random valid SSRC (not cseq which is small)
+            ssrc = 0x55667788
+            
             # RTP header: [ V(2)|P|X|CC(4) ] [ M|PT(7) ] [ Seq (16) ] [ TS (32) ] [ SSRC (32) ]
             rtp_header = bytearray(12)
             rtp_header[0] = 0x80 # V=2
             rtp_header[1] = 0x60 # M=0, PT=96 (0x60 = 96)
-            # If payload type in SETUP was 96.
             
             struct.pack_into('>H', rtp_header, 2, sequence_number)
             struct.pack_into('>I', rtp_header, 4, rtp_time)
-            struct.pack_into('>I', rtp_header, 8, self.cseq) # SSRC = Active-Remote or CSeq?
+            struct.pack_into('>I', rtp_header, 8, ssrc)
+            
+            if i % 50 == 0:
+                print(f"  [DEBUG] Sending RTP: Seq={sequence_number}, TS={rtp_time}")
             
             # Encryption
             # Nonce = 4 zero bytes + 8 byte little-endian counter
             nonce = bytearray(12) # zeros
             struct.pack_into('<Q', nonce, 4, encryption_counter) # Little Endian counter at offset 4
             
-            # AAD = rtp_header[4:12] (timestamp + ssrc) - like pyatv
+            # AAD: Try rtp_header[4:12] (Timestamp + SSRC)
+            # This is another common AAD format for AirPlay/RTP
             aad = bytes(rtp_header[4:12])
             
+            # Encrypt
             encrypted_payload = cipher.encrypt(payload, bytes(nonce), aad)
             encryption_counter += 1
             
@@ -1639,10 +1649,15 @@ class AirPlay2Client:
             
             # Send Anchor packet every ~1 second (every 44100/4096≈10 packets)
             # ALAC frame is 4096 samples approx 0.09s. So every 10 frames is ~1s.
-            if i % 10 == 0 and i > 0:
+            if i % 100 == 0 and i > 0:
                 # Calculate current PTP time as MONOTONIC nanoseconds
                 # This matches PTP Follow_Up timestamps (same epoch)
-                anchor_ptp_ns = time.monotonic_ns()
+                # Keep the 2s lead time in updates too?
+                # Usually Anchors are "Truth points". 
+                # If we say RTP Y = Now, then packet Y is due Now. 
+                # To maintain lead time, we should probably anchor:
+                # RTP Y = Now + 2s.
+                anchor_ptp_ns = time.monotonic_ns() + 2_000_000_000
                 send_anchor_packet(rtp_time, anchor_ptp_ns, ptp_clock_id, is_sentinel=False)
             
             # Pacing: calculate expected send time and wait if needed
