@@ -1218,15 +1218,15 @@ class AirPlay2Client:
         setup_body = {
             "streams": [
                 {
-                    "audioFormat": 0x40000,  # ALAC (262144) - Correct for AirPlay 2
+                    "audioFormat": 0x100000,  # PCM (1048576) - 16-bit little-endian
                     "audioMode": "default",
                     "controlPort": control_port,
-                    "ct": 2,  # Compression Type 2 (ALAC)
+                    "ct": 1,  # Compression Type 1 (PCM)
                     "isMedia": True,
                     "latencyMax": 88200,
                     "latencyMin": 11025,
                     "shk": shared_secret,
-                    "spf": 352,  # Samples Per Frame (Match iPhone/ffmpeg 352)
+                    "spf": 352,  # Samples Per Frame
                     "sr": 44100,  # Sample rate
                     "type": 0x60,  # Audio stream
                     "supportsDynamicStreamID": True,
@@ -1432,8 +1432,175 @@ class AirPlay2Client:
         if os.path.exists(filename):
             os.remove(filename)
             
-        print(f"  [CAF] Extracted {len(payloads)} ALAC frames")
+        print(f"  [PCM] Extracted {len(payloads)} PCM frames")
         return payloads
+    
+    def encode_alac_uncompressed(self, pcm_data: bytes, samples_per_frame: int = 352) -> bytes:
+        """Encode PCM data into an ALAC 'uncompressed' frame.
+        
+        ALAC supports an 'uncompressed' mode where raw PCM is wrapped in an ALAC header.
+        This avoids actual compression while maintaining ALAC compatibility.
+        
+        Header format (23 bits total):
+        - 3 bits: channels (1 = stereo, 0 = mono)
+        - 4 bits: unknown (0)
+        - 12 bits: unknown (0)  
+        - 1 bit: 'has size' flag (0 for fixed frame size)
+        - 2 bits: unknown (0)
+        - 1 bit: 'no compression' flag (1 = uncompressed PCM)
+        
+        PCM data follows with samples byte-swapped (big-endian 16-bit).
+        """
+        # Build the 23-bit header
+        # Bits: [channels:3][0:4][0:12][has_size:1][0:2][no_compress:1]
+        # stereo=1, no_compress=1 → 0b001_0000_000000000000_0_00_1 = 0x200001
+        
+        # Let's use bit-by-bit construction
+        bits = []
+        bits.extend([0, 0, 1])  # channels = 1 (3 bits)
+        bits.extend([0, 0, 0, 0])  # unknown (4 bits)
+        bits.extend([0] * 12)  # unknown (12 bits)
+        bits.extend([0])  # has_size = 0 (1 bit)
+        bits.extend([0, 0])  # unknown (2 bits)
+        bits.extend([1])  # no_compression = 1 (1 bit)
+        # Total: 23 bits
+        
+        # Convert PCM samples to big-endian
+        pcm_samples = []
+        for i in range(0, len(pcm_data), 2):
+            if i + 1 < len(pcm_data):
+                # Little-endian to big-endian swap
+                pcm_samples.append(pcm_data[i+1])
+                pcm_samples.append(pcm_data[i])
+        
+        # Add PCM as bits
+        for byte in pcm_samples:
+            for bit in range(7, -1, -1):
+                bits.append((byte >> bit) & 1)
+        
+        # Convert bit list to bytes
+        result = bytearray()
+        for i in range(0, len(bits), 8):
+            byte = 0
+            for j in range(8):
+                if i + j < len(bits):
+                    byte |= bits[i + j] << (7 - j)
+            result.append(byte)
+        
+        return bytes(result)
+    
+    def generate_pcm_payloads(self, duration: float, wav_file: str = None) -> list[bytes]:
+        """Generate PCM payloads (352 samples per frame, 16-bit stereo LE).
+        
+        If wav_file is provided, load audio from that file.
+        Otherwise, generate a synthetic sine wave.
+        """
+        import math
+        import struct
+        import wave
+        import os
+        
+        sample_rate = 44100
+        samples_per_frame = 352
+        channels = 2
+        bytes_per_sample = 2  # 16-bit
+        frame_size_bytes = samples_per_frame * channels * bytes_per_sample  # 1408 bytes
+        
+        payloads = []
+        
+        if wav_file and os.path.exists(wav_file):
+            print(f"  [PCM] Loading audio from {wav_file}...")
+            try:
+                with wave.open(wav_file, 'rb') as wf:
+                    # Check format
+                    if wf.getsampwidth() != 2:
+                        print(f"  [PCM] Warning: WAV is {wf.getsampwidth()*8}-bit, need 16-bit. Converting...")
+                    if wf.getframerate() != 44100:
+                        print(f"  [PCM] Warning: WAV is {wf.getframerate()}Hz, need 44100Hz. Using as-is.")
+                    if wf.getnchannels() == 1:
+                        print(f"  [PCM] Mono file detected, will duplicate to stereo")
+                    
+                    wav_channels = wf.getnchannels()
+                    wav_sample_width = wf.getsampwidth()
+                    
+                    # Read all frames
+                    raw_data = wf.readframes(wf.getnframes())
+                    
+                    # Convert to stereo 16-bit LE if needed
+                    if wav_channels == 1 and wav_sample_width == 2:
+                        # Mono 16-bit -> Stereo 16-bit
+                        stereo_data = bytearray()
+                        for i in range(0, len(raw_data), 2):
+                            sample = raw_data[i:i+2]
+                            stereo_data.extend(sample + sample)  # Duplicate for L+R
+                        raw_data = bytes(stereo_data)
+                    elif wav_channels == 2 and wav_sample_width == 2:
+                        # Already stereo 16-bit
+                        pass
+                    else:
+                        print(f"  [PCM] Unsupported format: {wav_channels}ch, {wav_sample_width*8}-bit")
+                        print(f"  [PCM] Falling back to sine wave")
+                        wav_file = None
+            except Exception as e:
+                print(f"  [PCM] Error loading WAV: {e}")
+                wav_file = None
+        
+        if wav_file and os.path.exists(wav_file):
+            # Slice into frames
+            offset = 0
+            while offset + frame_size_bytes <= len(raw_data):
+                payloads.append(raw_data[offset:offset + frame_size_bytes])
+                offset += frame_size_bytes
+            
+            # Limit to requested duration
+            max_frames = int(duration * sample_rate / samples_per_frame)
+            if len(payloads) > max_frames:
+                payloads = payloads[:max_frames]
+            
+            print(f"  [PCM] Loaded {len(payloads)} frames from WAV file")
+        else:
+            # Generate synthetic sine wave
+            total_samples = int(duration * sample_rate)
+            num_frames = total_samples // samples_per_frame
+            
+            print(f"  [PCM] Generating {num_frames} frames ({duration}s of sine wave)...")
+            
+            frequency = 440.0  # A4 note
+            
+            for frame_idx in range(num_frames):
+                frame_data = bytearray()
+                for sample_idx in range(samples_per_frame):
+                    global_sample = frame_idx * samples_per_frame + sample_idx
+                    t = global_sample / sample_rate
+                    # Generate sine wave
+                    value = int(32767 * 0.5 * math.sin(2 * math.pi * frequency * t))
+                    # Pack as 16-bit signed little-endian, stereo (same for both channels)
+                    frame_data.extend(struct.pack('<hh', value, value))
+                payloads.append(bytes(frame_data))
+            
+            print(f"  [PCM] Generated {len(payloads)} PCM frames")
+        
+        return payloads
+
+    def generate_alac_uncompressed_payloads(self, duration: float, wav_file: str = None) -> list[bytes]:
+        """Generate ALAC 'uncompressed' payloads (PCM wrapped in ALAC header).
+        
+        This generates PCM first, then wraps each frame in ALAC uncompressed format.
+        """
+        # First generate PCM frames
+        pcm_frames = self.generate_pcm_payloads(duration, wav_file)
+        
+        # Wrap each PCM frame in ALAC uncompressed header
+        alac_frames = []
+        for pcm_frame in pcm_frames:
+            alac_frame = self.encode_alac_uncompressed(pcm_frame)
+            alac_frames.append(alac_frame)
+        
+        print(f"  [ALAC] Wrapped {len(alac_frames)} frames in ALAC uncompressed format")
+        if alac_frames:
+            print(f"  [ALAC] Frame size: PCM {len(pcm_frames[0])} bytes -> ALAC {len(alac_frames[0])} bytes")
+        
+        return alac_frames
 
     def send_audio_packets(self, duration_sec: float = 5.0):
         """Send generated audio packets over UDP."""
@@ -1499,9 +1666,9 @@ class AirPlay2Client:
             struct.pack_into('>H', packet, 2, anchor_packet_seq & 0xFFFF)
             anchor_packet_seq += 1
             
-            # Bytes 4-7: frame_1 = frame_2 + LATENCY_FRAMES (the RTP with latency included)
+            # Bytes 4-7: frame_1 = frame_2 - LATENCY_FRAMES (shairport calculates notified_latency = frame_2 - frame_1)
             frame_2 = rtp_ts & 0xFFFFFFFF
-            frame_1 = (frame_2 + LATENCY_FRAMES) & 0xFFFFFFFF
+            frame_1 = (frame_2 - LATENCY_FRAMES) & 0xFFFFFFFF
             struct.pack_into('>I', packet, 4, frame_1)
             
             # Bytes 8-15: remote_packet_time_ns (PTP time in nanoseconds, big-endian uint64)
@@ -1546,8 +1713,11 @@ class AirPlay2Client:
         # We need to run sync sending inside the send_audio_packets loop 
         # or in parallel, but using the same clock source.
         
-        # Generate ALAC packets via ffmpeg
-        alac_frames = self.generate_alac_payloads(duration_sec)
+        # Generate ALAC uncompressed frames (PCM wrapped in ALAC header)
+        # Try to load test audio file if it exists
+        wav_file = "/home/g8row/Documents/centuryplay/test_audio.wav"
+        
+        alac_frames = self.generate_alac_uncompressed_payloads(duration_sec, wav_file=wav_file)
         
         if not alac_frames:
             print("Error: No ALAC frames generated!")
@@ -1564,15 +1734,8 @@ class AirPlay2Client:
         
         # Audio params
         sample_rate = 44100
-        # ALAC frame size is typically 352 or 4096 depending on encoder.
-        # ffmpeg usually does 4096 for default ALAC.
-        # We should increment timestamp by the number of samples in the frame.
-        # How do we know samples per frame?
-        # ALAC frames are variable size in bytes, but fixed in samples usually.
-        # ALAC frames are variable size in bytes, but fixed in samples usually.
-        # Standard ALAC is 4096 samples per frame.
-        samples_per_frame = 352 # Forced in ffmpeg
-        frame_duration_ns = int((samples_per_frame / sample_rate) * 1_000_000_000)  # Frame duration in nanoseconds
+        samples_per_frame = 352  # PCM frame size matches SETUP spf
+        frame_duration_ns = int((samples_per_frame / sample_rate) * 1_000_000_000)
         
         start_time_ns = time.time_ns() - 2_000_000_000  # Pre-fill buffer (2 seconds in ns)
         encryption_counter = 0 # 64-bit nonce counter for ChaCha20
@@ -1647,28 +1810,35 @@ class AirPlay2Client:
             
             # Pacing and Sync
             
-            # Send Anchor packet every ~1 second (every 44100/4096≈10 packets)
-            # ALAC frame is 4096 samples approx 0.09s. So every 10 frames is ~1s.
-            if i % 100 == 0 and i > 0:
-                # Calculate current PTP time as MONOTONIC nanoseconds
-                # This matches PTP Follow_Up timestamps (same epoch)
-                # Keep the 2s lead time in updates too?
-                # Usually Anchors are "Truth points". 
-                # If we say RTP Y = Now, then packet Y is due Now. 
-                # To maintain lead time, we should probably anchor:
-                # RTP Y = Now + 2s.
-                anchor_ptp_ns = time.monotonic_ns() + 2_000_000_000
+            # Send Anchor packet every ~1 second (~125 packets at 352 samples = ~1s)
+            # PCM frame is 352 samples = ~8ms. 125 frames ≈ 1s.
+            if i % 125 == 0 and i > 0:
+                # The anchor establishes the mapping: RTP timestamp <-> PTP time
+                # For consistent timing, calculate what PTP time this RTP should play at
+                # Based on the initial mapping: initial_rtp plays at initial_ptp_ns
+                # So rtp_time = initial_rtp + elapsed_samples
+                # And ptp_time = initial_ptp_ns + elapsed_ns
+                elapsed_samples = rtp_time - initial_rtp
+                elapsed_ns = int(elapsed_samples / sample_rate * 1_000_000_000)
+                anchor_ptp_ns = initial_ptp_ns + elapsed_ns
                 send_anchor_packet(rtp_time, anchor_ptp_ns, ptp_clock_id, is_sentinel=False)
             
+            # Batching Logic: Send packets in bursts to allow meaningful sleep intervals
+            # SPF=352 -> ~8ms per packet. Python sleep is inaccurate <15ms.
+            # Batch 10 packets -> ~80ms. This allows robust sleeping.
+            
             # Pacing: calculate expected send time and wait if needed
-            expected_send_time_ns = start_time_ns + int(i * frame_duration_ns * 0.995)  # Slight speedup
-            now_ns = time.time_ns()
-            if expected_send_time_ns > now_ns:
-                time.sleep((expected_send_time_ns - now_ns) / 1_000_000_000)
+            # Only sleep after a batch or if we are way ahead
+            if i % 10 == 0:
+                target_time_ns = start_time_ns + ((i + 1) * frame_duration_ns)
+                now_ns = time.time_ns()
+                wait_ns = target_time_ns - now_ns
                 
-            if i % 20 == 0:
+                if wait_ns > 1_000_000: # Only sleep if > 1ms ahead
+                    time.sleep(wait_ns / 1_000_000_000)
                 print(f"\r  Sent {i}/{len(alac_frames)} packets", end="", flush=True)
                 
+        print(f"\r  Sent {len(alac_frames)}/{len(alac_frames)} packets", flush=True)
         print("\nSending Complete.")
         audio_sock.close()
         ctrl_sock.close()
