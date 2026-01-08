@@ -9,7 +9,10 @@ import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.enableEdgeToEdge
 import androidx.core.content.edit
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.color.DynamicColors
@@ -19,12 +22,8 @@ class SettingsActivity : AppCompatActivity() {
 
     companion object {
         const val PREFS_NAME = "airplay_prefs"
-        const val KEY_PROTOCOL = "protocol_preference"
         const val KEY_DEBUG_MODE = "debug_mode"
         const val KEY_MANUAL_HOST = "manual_host"
-        const val PROTOCOL_AUTO = 0
-        const val PROTOCOL_V1 = 1
-        const val PROTOCOL_V2 = 2
     }
 
     private lateinit var prefs: SharedPreferences
@@ -32,13 +31,33 @@ class SettingsActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         DynamicColors.applyToActivityIfAvailable(this)
         super.onCreate(savedInstanceState)
+        
+        // Enable edge-to-edge
+        enableEdgeToEdge()
+        
         setContentView(R.layout.activity_settings)
 
         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        
+        // Handle insets for toolbar
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.appBar)) { view: View, windowInsets: WindowInsetsCompat ->
+            val insets = windowInsets.getInsets(WindowInsetsCompat.Type.statusBars())
+            view.setPadding(0, insets.top, 0, 0)
+            windowInsets
+        }
+
+        // Check for dark mode
+        val isNightMode = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+        
+        // Use light status bar icons (false) for dark theme, dark icons (true) for light theme
+        val windowInsetsController = androidx.core.view.WindowInsetsControllerCompat(window, window.decorView)
+        windowInsetsController.isAppearanceLightStatusBars = !isNightMode
 
         setupToolbar()
-        setupProtocolToggle()
+        setupMetadataPermission()
+        setupGeneralSettings()
         setupDebugMode()
+        setupFooter()
     }
 
     private fun setupToolbar() {
@@ -46,25 +65,69 @@ class SettingsActivity : AppCompatActivity() {
         toolbar.setNavigationOnClickListener { finish() }
     }
 
-    private fun setupProtocolToggle() {
-        val radioGroup = findViewById<RadioGroup>(R.id.protocolRadioGroup)
-        val currentProtocol = prefs.getInt(KEY_PROTOCOL, PROTOCOL_AUTO)
+    private fun setupMetadataPermission() {
+        val permissionLayout = findViewById<LinearLayout>(R.id.metadataPermissionLayout)
+        val grantButton = findViewById<MaterialButton>(R.id.grantPermissionButton)
+        val permissionStatus = findViewById<TextView>(R.id.permissionStatus)
 
-        // Set initial selection
-        when (currentProtocol) {
-            PROTOCOL_V1 -> radioGroup.check(R.id.radioV1)
-            PROTOCOL_V2 -> radioGroup.check(R.id.radioV2)
-            else -> radioGroup.check(R.id.radioAuto)
+        fun checkPermission(): Boolean {
+            val componentName = android.content.ComponentName(this, com.airplay.streamer.service.NotificationListener::class.java)
+            val flat = android.provider.Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
+            return flat != null && flat.contains(componentName.flattenToString())
         }
 
-        // Listen for changes
-        radioGroup.setOnCheckedChangeListener { _, checkedId ->
-            val protocol = when (checkedId) {
-                R.id.radioV1 -> PROTOCOL_V1
-                R.id.radioV2 -> PROTOCOL_V2
-                else -> PROTOCOL_AUTO
+        fun updateUI() {
+            val hasPermission = checkPermission()
+            if (hasPermission) {
+                permissionStatus.text = "permission active"
+                permissionStatus.setTextColor(com.google.android.material.color.MaterialColors.getColor(permissionStatus, com.google.android.material.R.attr.colorOnSurface))
+                grantButton.visibility = View.GONE
+            } else {
+                permissionStatus.text = "permission needed"
+                permissionStatus.setTextColor(com.google.android.material.color.MaterialColors.getColor(permissionStatus, com.google.android.material.R.attr.colorError))
+                grantButton.visibility = View.VISIBLE
             }
-            prefs.edit { putInt(KEY_PROTOCOL, protocol) }
+        }
+
+        grantButton.setOnClickListener {
+            try {
+                startActivity(android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            } catch (e: Exception) {
+                Toast.makeText(this, "Could not open settings", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        // Check on resume to update state if user comes back
+        permissionLayout.viewTreeObserver.addOnWindowFocusChangeListener { hasFocus ->
+            if (hasFocus) updateUI()
+        }
+        
+        updateUI()
+
+        // Setup Show Now Playing Switch
+        val showNowPlayingSwitch = findViewById<MaterialSwitch>(R.id.showNowPlayingSwitch)
+        showNowPlayingSwitch.isChecked = prefs.getBoolean("show_now_playing", true)
+        
+        showNowPlayingSwitch.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean("show_now_playing", isChecked).apply()
+        }
+
+        setupGeneralSettings()
+    }
+
+    private fun setupGeneralSettings() {
+        // Keep Screen On
+        val keepScreenOnSwitch = findViewById<MaterialSwitch>(R.id.keepScreenOnSwitch)
+        keepScreenOnSwitch.isChecked = prefs.getBoolean("keep_screen_on", false)
+        keepScreenOnSwitch.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean("keep_screen_on", isChecked).apply()
+        }
+
+        // Auto Connect
+        val autoConnectSwitch = findViewById<MaterialSwitch>(R.id.autoConnectSwitch)
+        autoConnectSwitch.isChecked = prefs.getBoolean("auto_connect", false)
+        autoConnectSwitch.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean("auto_connect", isChecked).apply()
         }
     }
 
@@ -115,6 +178,18 @@ class SettingsActivity : AppCompatActivity() {
             Toast.makeText(this, "Manual device saved: $host:$port\nGo back to connect", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
             Toast.makeText(this, "Invalid input: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun setupFooter() {
+        val footer = findViewById<TextView>(R.id.developerFooter)
+        footer.setOnClickListener {
+            try {
+                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/g8row/centuryplay"))
+                startActivity(intent)
+            } catch (e: Exception) {
+                Toast.makeText(this, "Could not open browser", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 }

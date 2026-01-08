@@ -65,7 +65,6 @@ class AudioCaptureService : Service() {
     private var mediaProjection: MediaProjection? = null
     private var audioRecord: AudioRecord? = null
     private var raopClient: RaopClient? = null
-    private var airPlay2Client: com.airplay.streamer.raop.AirPlay2Client? = null
     private var captureJob: Job? = null
 
     private var isCapturing = false
@@ -128,59 +127,7 @@ class AudioCaptureService : Service() {
                     return@launch
                 }
 
-                // Get protocol preference from SharedPreferences
-                val prefs = getSharedPreferences("airplay_prefs", MODE_PRIVATE)
-                val protocolPref = prefs.getInt("protocol_preference", 0) // 0=Auto, 1=v1, 2=v2
-                
-                // Determine which protocol to use
-                val useV2 = when (protocolPref) {
-                    1 -> false // Force v1
-                    2 -> true  // Force v2
-                    else -> port == 7000 // Auto: use v2 if port is 7000
-                }
-                
-                LogServer.log("Protocol preference: $protocolPref, Using AirPlay ${if (useV2) "v2" else "v1"}")
-
-                if (useV2) {
-                    // AirPlay 2 Path
-                    LogServer.log("Starting AirPlay 2 connection to $host:$port")
-                    val device = com.airplay.streamer.discovery.AirPlayDevice(
-                        deviceName, host, port, "deviceid", null, emptyMap()
-                    )
-                    
-                    val client = com.airplay.streamer.raop.AirPlay2Client(device)
-                    airPlay2Client = client
-                    
-                    client.connect()
-                    LogServer.log("Connected. Attempting Pair-Setup...")
-                    
-                    try {
-                        client.pair("0000") // Default PIN - TODO: make configurable
-                        LogServer.log("AirPlay 2 Pair-Setup Successful!")
-                        
-                        // Try to set up audio stream
-                        LogServer.log("Setting up audio stream...")
-                        val serverPort = client.setupAudioStream()
-                        LogServer.log("Audio stream ready on server port $serverPort")
-                        
-                        // Start audio capture for v2
-                        val captureStarted = tryAudioPlaybackCapture()
-                        if (captureStarted) {
-                            isCapturing = true
-                            onStateChanged?.invoke(true)
-                            LogServer.log("Audio capture started for AirPlay 2")
-                            startAirPlay2StreamLoop(client)
-                        } else {
-                            LogServer.log("Audio capture failed for AirPlay 2")
-                            stopCapture()
-                        }
-                    } catch (e: Exception) {
-                        LogServer.log("AirPlay 2 error: ${e.message}")
-                        // Pairing or stream setup failed, but connection is ok
-                        onStateChanged?.invoke(false)
-                    }
-                    return@launch
-                }
+                LogServer.log("Protocol force: AirPlay 1 (RAOP)")
 
                 // AirPlay 1 (RAOP) Path
                 LogServer.log("Starting AirPlay 1 (RAOP) connection to $host:$port")
@@ -293,35 +240,9 @@ class AudioCaptureService : Service() {
         }
     }
 
-    private fun startAirPlay2StreamLoop(client: com.airplay.streamer.raop.AirPlay2Client) {
-        captureJob = serviceScope.launch(Dispatchers.IO) {
-            val buffer = ByteArray(BUFFER_SIZE)
-            var packetCount = 0L
-
-            while (isActive && isCapturing) {
-                val bytesRead = audioRecord?.read(buffer, 0, BUFFER_SIZE) ?: -1
-
-                if (bytesRead > 0) {
-                    // For AirPlay 2, we'd need to format as buffered audio packets
-                    // For now, just send raw data (will need RTP wrapping for real implementation)
-                    client.streamAudio(buffer.copyOf(bytesRead))
-                    packetCount++
-                    
-                    // Log progress periodically
-                    if (packetCount % 1000 == 0L) {
-                        com.airplay.streamer.util.LogServer.log("AirPlay 2: Sent $packetCount packets")
-                    }
-                } else if (bytesRead < 0) {
-                    // Error reading audio
-                    com.airplay.streamer.util.LogServer.log("AirPlay 2: Audio read error")
-                    break
-                }
-            }
-            com.airplay.streamer.util.LogServer.log("AirPlay 2: Stream loop ended")
-        }
-    }
-
     private fun stopCapture() {
+        if (!isCapturing && raopClient == null) return // Already stopped
+        
         LogServer.log("stopCapture() called - cleaning up")
         
         // Pause media playback so audio doesn't continue on phone speaker
@@ -347,21 +268,18 @@ class AudioCaptureService : Service() {
         }
         audioRecord = null
 
-        // Disconnect clients synchronously using runBlocking
-        runBlocking {
+        // Disconnect clients in background to avoid blocking main thread
+        // IMPORTANT: Clear callback first to prevent recursion (disconnect triggers callback -> triggers stopCapture)
+        raopClient?.callback = null
+        
+        serviceScope.launch(Dispatchers.IO) {
             try {
                 raopClient?.disconnect()
             } catch (e: Exception) {
                 LogServer.log("Error disconnecting RAOP client: ${e.message}")
+            } finally {
+                raopClient = null
             }
-            raopClient = null
-            
-            try {
-                airPlay2Client?.disconnect()
-            } catch (e: Exception) {
-                LogServer.log("Error disconnecting AirPlay2 client: ${e.message}")
-            }
-            airPlay2Client = null
         }
 
         // Stop MediaProjection - this MUST be called to stop screen sharing indicator

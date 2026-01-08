@@ -34,10 +34,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val discoveredDevices = mutableMapOf<String, AirPlayDevice>()
     private var discoveryJob: Job? = null
 
+    private val mediaInfoTracker = com.airplay.streamer.service.MediaInfoTracker(application)
+    val mediaInfo = mediaInfoTracker.mediaInfo
+
     init {
         startDiscovery()
+        mediaInfoTracker.start()
     }
-
+    
     private fun startDiscovery() {
         discoveryJob = viewModelScope.launch {
             discovery.discoverDevices().collect { event ->
@@ -46,9 +50,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         updateStatus("searching for airplay speakers...")
                     }
                     is DiscoveryEvent.DeviceFound -> {
-                        val key = "${event.device.host}:${event.device.port}"
-                        discoveredDevices[key] = event.device
-                        updateDeviceList()
+                        // Filter out AirPlay 2 devices (protocolVersion == 2)
+                        // Only add if it's strictly AirPlay 1 (RAOP)
+                        if (event.device.protocolVersion != 2) {
+                            val key = "${event.device.host}:${event.device.port}"
+                            discoveredDevices[key] = event.device
+                            updateDeviceList()
+                        }
                     }
                     is DiscoveryEvent.DeviceLost -> {
                         val key = "${event.device.host}:${event.device.port}"
@@ -65,7 +73,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val message = if (devices.isEmpty()) {
             "searching for airplay speakers..."
         } else {
-            "found ${devices.size} speakers"
+            if (devices.size == 1) "found 1 speaker" else "found ${devices.size} speakers"
         }
         _uiState.value = _uiState.value.copy(
             devices = devices,
@@ -122,8 +130,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.value = _uiState.value.copy(isStreaming = isStreaming)
     }
 
+    fun togglePlayback() {
+        mediaInfoTracker.togglePlayback()
+    }
+
     override fun onCleared() {
         super.onCleared()
         discovery.stop()
+        mediaInfoTracker.stop()
     }
 }

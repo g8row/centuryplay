@@ -24,10 +24,10 @@
     
     <!-- Debug mode -->
     <string name="debug_mode">debug mode</string>
-    <string name="debug_mode_summary">enable advanced options for development</string>
+    <string name="debug_mode_summary">enable advanced options</string>
     <string name="manual_connect">manual connect</string>
     <string name="manual_connect_title">manual connection</string>
-    <string name="manual_connect_hint">enter IP:port (e.g. 192.168.1.100:5000)</string>
-    <string name="manual_connect_description">connect to a device not discovered via mDNS</string>
+    <string name="manual_connect_hint">ip:port (e.g. 192.168.1.100:5000)</string>
+    <string name="manual_connect_description">connect to a device not discovered via mdns</string>
     <string name="save_manual_device">save device</string>
 </resources>

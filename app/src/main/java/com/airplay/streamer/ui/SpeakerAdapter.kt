@@ -40,8 +40,8 @@ class SpeakerAdapter(
         private val protocolBadge: TextView = itemView.findViewById(R.id.protocolChip)
 
         fun bind(item: SpeakerItem, onConnectClick: (AirPlayDevice) -> Unit) {
-            speakerName.text = item.device.displayName
-            speakerAddress.text = item.device.host
+            speakerName.text = item.device.displayName.lowercase()
+            speakerAddress.text = item.device.host.lowercase()
             
             // Show protocol version based on port
             val isV2 = item.device.port == 7000

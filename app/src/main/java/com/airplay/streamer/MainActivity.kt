@@ -37,6 +37,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var speakerAdapter: SpeakerAdapter
 
     private var pendingDevice: AirPlayDevice? = null
+    private var hasAttemptedAutoConnect = false
 
     private val mediaProjectionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -97,6 +98,9 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         checkForManualDevice()
+        // Refresh UI to update media player visibility if permission changed
+        val isStreaming = AudioCaptureService.instance?.isCurrentlyStreaming() == true
+        updateStreamingUI(isStreaming)
     }
 
     private fun checkForManualDevice() {
@@ -163,8 +167,8 @@ class MainActivity : AppCompatActivity() {
         binding.speakersRecyclerView.apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
             adapter = speakerAdapter
-            // Disable item animations to prevent crash on rapid tapping
-            itemAnimator = null
+            // Enable default animations for entry/exit effects
+            itemAnimator = androidx.recyclerview.widget.DefaultItemAnimator()
         }
     }
     
@@ -182,6 +186,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupControls() {
+        // Play/Pause button
+        binding.playPauseButton.setOnClickListener {
+            viewModel.togglePlayback()
+        }
+
         binding.streamButton.setOnClickListener {
             val device = viewModel.uiState.value.selectedDevice
             if (device == null) {
@@ -245,6 +254,60 @@ class MainActivity : AppCompatActivity() {
 
                     // Update streaming state
                     updateStreamingUI(state.isStreaming)
+                    
+                    // Auto-Connect Logic
+                    if (!hasAttemptedAutoConnect && !state.isStreaming && state.devices.isNotEmpty()) {
+                        val prefs = getSharedPreferences(SettingsActivity.PREFS_NAME, MODE_PRIVATE)
+                        if (prefs.getBoolean("auto_connect", false)) {
+                            val lastHost = prefs.getString("last_device_host", null)
+                            val lastPort = prefs.getInt("last_device_port", 0)
+                            
+                            if (lastHost != null && lastPort != 0) {
+                                val match = state.devices.find { it.host == lastHost && it.port == lastPort }
+                                if (match != null) {
+                                    hasAttemptedAutoConnect = true
+                                    Toast.makeText(this@MainActivity, "Auto-connecting to ${match.displayName}...", Toast.LENGTH_SHORT).show()
+                                    viewModel.selectDevice(match)
+                                    checkPermissionsAndStart(match)
+                                }
+                            }
+                        }
+                        // Only try once per app session (or until devices list is populated enough)
+                        // If we have devices but no match, we still mark attempted so we don't spam
+                         if (state.devices.isNotEmpty()) hasAttemptedAutoConnect = true
+                    }
+                }
+            }
+        }
+
+        // Observe media info for Now Playing updates
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.mediaInfo.collect { info ->
+                    if (info.hasContent) {
+                        binding.nowPlayingTitle.text = (info.title ?: "unknown title").lowercase()
+                        binding.nowPlayingArtist.text = (info.artist ?: "unknown artist").lowercase()
+                        
+                        // Update Play/Pause Icon
+                        val iconRes = if (info.isPlaying) R.drawable.ic_stop else R.drawable.ic_play
+                        binding.playPauseButton.setImageResource(iconRes)
+                        
+                        if (info.albumArt != null) {
+                            binding.albumArt.imageTintList = null // Clear tint for actual image
+                            binding.albumArt.setImageBitmap(info.albumArt)
+                        } else {
+                            // Restore tint for placeholder icon
+                            binding.albumArt.imageTintList = android.content.res.ColorStateList.valueOf(
+                                com.google.android.material.color.MaterialColors.getColor(binding.albumArt, com.google.android.material.R.attr.colorOnSurfaceVariant)
+                            )
+                            binding.albumArt.setImageResource(R.drawable.ic_music_note)
+                        }
+                    } else {
+                        // Reset to check
+                        binding.nowPlayingTitle.text = "waiting for music..."
+                        binding.nowPlayingArtist.text = "play something on spotify/music app"
+                        binding.playPauseButton.setImageResource(R.drawable.ic_play)
+                    }
                 }
             }
         }
@@ -253,9 +316,9 @@ class MainActivity : AppCompatActivity() {
     private fun updateConnectedSpeakerUI(device: AirPlayDevice?) {
         if (device != null) {
             binding.connectedSpeakerLayout.visibility = View.VISIBLE
-            binding.connectedSpeakerName.text = device.displayName
-            // Show protocol version chip
-            binding.protocolChip.text = if (device.port == 7000) "v2" else "v1"
+            binding.connectedSpeakerName.text = device.displayName.lowercase()
+            // Hide protocol version chip for v1-only mode
+            binding.protocolChip.visibility = View.GONE
         } else {
             binding.connectedSpeakerLayout.visibility = View.GONE
         }
@@ -278,6 +341,26 @@ class MainActivity : AppCompatActivity() {
             
             // Show volume layout
             binding.volumeLayout.visibility = View.VISIBLE
+
+            // Handle Keep Screen On
+            val keepScreenOn = getSharedPreferences(SettingsActivity.PREFS_NAME, MODE_PRIVATE)
+                .getBoolean("keep_screen_on", false)
+            
+            if (keepScreenOn) {
+                window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            } else {
+                window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+
+            // Show media player only if permission is granted AND enabled in settings
+            val showNowPlaying = getSharedPreferences(SettingsActivity.PREFS_NAME, MODE_PRIVATE)
+                .getBoolean("show_now_playing", true)
+
+            if (showNowPlaying && hasMetadataPermission()) {
+                binding.nowPlayingLayout.visibility = View.VISIBLE
+            } else {
+                binding.nowPlayingLayout.visibility = View.GONE
+            }
             
             binding.streamingStatusText.visibility = View.VISIBLE
             binding.streamingStatusText.text = "streaming..."
@@ -309,11 +392,17 @@ class MainActivity : AppCompatActivity() {
             
             // Hide volume layout
             binding.volumeLayout.visibility = View.GONE
+
+            // Hide media player
+            binding.nowPlayingLayout.visibility = View.GONE
             
             binding.streamingStatusText.visibility = View.GONE
             binding.connectionIndicator.animate().cancel()
             binding.connectionIndicator.scaleX = 1f
             binding.connectionIndicator.scaleY = 1f
+            
+            // Allow screen to turn off
+            window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
     }
 
@@ -350,6 +439,13 @@ class MainActivity : AppCompatActivity() {
             putExtra(AudioCaptureService.EXTRA_PORT, device.port)
             putExtra(AudioCaptureService.EXTRA_DEVICE_NAME, device.displayName)
         }
+        
+        // Save Last Device for Auto-Connect
+        getSharedPreferences(SettingsActivity.PREFS_NAME, MODE_PRIVATE).edit()
+            .putString("last_device_host", device.host)
+            .putInt("last_device_port", device.port)
+            .apply()
+
         startForegroundService(serviceIntent)
         
         // Update UI immediately to show streaming state
@@ -372,6 +468,12 @@ class MainActivity : AppCompatActivity() {
             action = AudioCaptureService.ACTION_STOP
         }
         startService(serviceIntent)
+    }
+
+    private fun hasMetadataPermission(): Boolean {
+        val componentName = android.content.ComponentName(this, com.airplay.streamer.service.NotificationListener::class.java)
+        val flat = android.provider.Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
+        return flat != null && flat.contains(componentName.flattenToString())
     }
 
     override fun onDestroy() {
