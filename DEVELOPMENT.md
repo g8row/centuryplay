@@ -1,69 +1,69 @@
-# centuryplay - development guide
+# development guide
 
-## Build Environment
+## build environment
 
-### Prerequisites
-- **Java JDK 17+** (JDK 21 recommended)
-- **Android SDK** with:
-  - Platform SDK 34 (Android 14)
-  - Build Tools 34.0.0
-  - Platform Tools (adb)
+### prerequisites
+- **java jdk 17+** (jdk 21 recommended)
+- **android sdk** with:
+  - platform sdk 35 (android 15)
+  - build tools 35.0.0
+  - platform tools (adb)
 
-### Linux Setup
+### linux setup
 
-#### Install Java
+#### install java
 ```bash
-# Debian/Ubuntu
+# debian/ubuntu
 sudo apt install openjdk-21-jdk
 
-# Verify
+# verify
 java -version
 ```
 
-#### Install Android SDK (Option 1: Android Studio)
+#### install android sdk (option 1: android studio)
 ```bash
-# Via snap (recommended)
+# via snap (recommended)
 sudo snap install android-studio --classic
 
-# Launch Android Studio and complete setup wizard to download SDK
-# SDK will be installed to ~/Android/Sdk by default
+# launch android studio and complete setup wizard to download sdk
+# sdk will be installed to ~/Android/Sdk by default
 ```
 
-#### Install Android SDK (Option 2: Command-line only)
+#### install android sdk (option 2: command-line only)
 ```bash
-# Create SDK directory
+# create sdk directory
 mkdir -p ~/Android/Sdk/cmdline-tools
 cd ~/Android/Sdk/cmdline-tools
 
-# Download command-line tools
+# download command-line tools
 wget https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
 unzip commandlinetools-linux-*.zip
 mv cmdline-tools latest
 
-# Add to PATH (add to ~/.bashrc or ~/.zshrc)
+# add to path (add to ~/.bashrc or ~/.zshrc)
 export ANDROID_HOME=~/Android/Sdk
 export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
 
-# Accept licenses and install components
+# accept licenses and install components
 sdkmanager --licenses
-sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
 ```
 
-#### Build Command (Linux)
+#### build command (linux)
 ```bash
 cd /path/to/centuryplay
-chmod +x gradlew   # First time only
+chmod +x gradlew   # first time only
 ./gradlew assembleDebug
 ```
 
-The APK will be at: `app/build/outputs/apk/debug/app-debug.apk`
+apk location: `app/build/outputs/apk/debug/app-debug.apk`
 
-### Windows Setup
+### windows setup
 
-#### Prerequisites
-- Android Studio installed (includes JDK and SDK)
+#### prerequisites
+- android studio installed (includes jdk and sdk)
 
-#### Build Command (PowerShell)
+#### build command (powershell)
 ```powershell
 $env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
 $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
@@ -72,159 +72,159 @@ $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
 
 ---
 
-## Deployment & Debugging
+## deployment & debugging
 
-### Install APK
+### install apk
 
-#### Linux
+#### linux
 ```bash
-# Uninstall previous version (optional, clears app state)
+# uninstall previous version (optional, clears app state)
 adb uninstall com.airplay.streamer
 
-# Install debug APK
+# install debug apk
 adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
-#### Windows (PowerShell)
+#### windows (powershell)
 ```powershell
-# Uninstall
+# uninstall
 .\platform-tools\adb.exe uninstall com.airplay.streamer
 
-# Install Debug APK
+# install debug apk
 .\platform-tools\adb.exe install app\build\outputs\apk\debug\app-debug.apk
 ```
 
-### Logging
+### logging
 
-#### Linux
+#### linux
 ```bash
-# ADB Logcat (Last 2000 lines)
+# adb logcat (last 2000 lines)
 adb logcat -d -t 2000
 
-# Filter for app logs
+# filter for app logs
 adb logcat -d -t 2000 | grep -E "AirPlay|RAOP|AudioCapture|RaopClient"
 ```
 
-#### Windows (PowerShell)
+#### windows (powershell)
 ```powershell
 .\platform-tools\adb.exe logcat -d -t 2000 | Select-String -Pattern "AirPlay|RAOP|AudioCapture"
 ```
 
-### Web Log Server
-The app runs a web server for viewing logs in real-time:
-- URL: `http://<PHONE_IP>:8080/`
+### web log server
+the app runs a web server for viewing logs in real-time:
+- url: `http://<PHONE_IP>:8080/`
 
 ---
 
-## Docker Testing Environment
+## docker testing environment
 
-### **Shairport-sync (Local AirPlay Receiver)**
+### **shairport-sync (local airplay receiver)**
 
-The project includes a `docker-compose.yml` for running a local AirPlay receiver using [shairport-sync](https://github.com/mikebrady/shairport-sync).
+the project includes a `docker-compose.yml` for running a local airplay receiver using [shairport-sync](https://github.com/mikebrady/shairport-sync).
 
-#### Prerequisites
-- Docker Desktop for Windows with WSL2 backend
-- Linux (in WSL2) for full mDNS support
+#### prerequisites
+- docker desktop for windows with wsl2 backend
+- linux (in wsl2) for full mdns support
 
-#### Start the AirPlay Receiver
+#### start the airplay receiver
 ```bash
-# In WSL2 terminal, navigate to project directory
+# in wsl2 terminal, navigate to project directory
 cd /mnt/c/Users/g8row/Documents/airplay
 
-# Start shairport-sync
+# start shairport-sync
 docker compose up -d
 
-# View logs
+# view logs
 docker compose logs -f shairport-sync
 ```
 
-#### Windows Limitations
-- **mDNS Discovery**: Host networking doesn't work the same on Windows/WSL2. The container may not be discoverable automatically.
-- **Workaround**: Run shairport-sync directly in WSL2 without Docker, or use a Linux VM.
+#### windows limitations
+- **mdns discovery**: host networking doesn't work the same on windows/wsl2. the container may not be discoverable automatically.
+- **workaround**: run shairport-sync directly in wsl2 without docker, or use a linux vm.
 
-#### WSL2 Native Install (Alternative)
+#### wsl2 native install (alternative)
 ```bash
-# In WSL2 Ubuntu
+# in wsl2 ubuntu
 sudo apt-get update
 sudo apt-get install shairport-sync
 
-# Run with debug output (dummy - no audio)
+# run with debug output (dummy - no audio)
 shairport-sync -v --statistics -o dummy
 
-# Run with actual audio (PulseAudio - requires WSLg or PulseAudio server)
+# run with actual audio (pulseaudio - requires wslg or pulseaudio server)
 shairport-sync -v --statistics -o pa
 ```
 
-#### Linux/Laptop Setup (With Audio Output)
-On a real Linux machine or laptop with speakers:
+#### linux/laptop setup (with audio output)
+on a real linux machine or laptop with speakers:
 ```bash
-# Install
+# install
 sudo apt-get update
 sudo apt-get install shairport-sync pulseaudio
 
-# Start PulseAudio if not running
+# start pulseaudio if not running
 pulseaudio --start
 
-# Run shairport-sync with PulseAudio output
+# run shairport-sync with pulseaudio output
 shairport-sync --name="Laptop-AirPlay" -v -o pa
 
-# Or with ALSA (direct to sound card, no PulseAudio)
+# or with alsa (direct to sound card, no pulseaudio)
 shairport-sync --name="Laptop-AirPlay" -v -o alsa
 ```
 
-**Port forwarding** (if behind NAT/firewall):
-- Port 5000/TCP (RTSP)
-- Ports 6000-6010/UDP (RTP audio)
+**port forwarding** (if behind nat/firewall):
+- port 5000/tcp (rtsp)
+- ports 6000-6010/udp (rtp audio)
 
 ---
 
-## Traffic Capture & Analysis
+## traffic capture & analysis
 
-### **Capture AirPlay Traffic**
+### **capture airplay traffic**
 
-#### Using Docker (Linux/WSL2)
+#### using docker (linux/wsl2)
 ```bash
-# Start capture container alongside shairport
+# start capture container alongside shairport
 docker compose --profile capture up -d
 
-# Captures are saved to ./captures/
+# captures are saved to ./captures/
 ```
 
-#### Using Wireshark on Windows
-1. Open Wireshark
-2. Select your network interface (WiFi or Ethernet)
-3. Apply filter: `tcp.port == 7000 or tcp.port == 5000 or udp.port == 5353`
-4. Start capture
-5. Cast audio from Apple Music or this app to an AirPlay device
+#### using wireshark on windows
+1. open wireshark
+2. select your network interface (wifi or ethernet)
+3. apply filter: `tcp.port == 7000 or tcp.port == 5000 or udp.port == 5353`
+4. start capture
+5. cast audio from apple music or this app to an airplay device
 
-#### Analyzing Apple Music Traffic
-The Apple Music Windows app supports AirPlay. To analyze its traffic:
+#### analyzing apple music traffic
+the apple music windows app supports airplay. to analyze its traffic:
 
-1. Start Wireshark capture
-2. Open Apple Music and play audio
-3. Click the AirPlay icon and select a device
-4. Observe the traffic in Wireshark
-5. Look for:
-   - HTTP requests to port 7000 (AirPlay 2 control)
-   - RTSP requests to port 5000 (AirPlay 1/RAOP)
-   - TLV8-encoded pairing data
+1. start wireshark capture
+2. open apple music and play audio
+3. click the airplay icon and select a device
+4. observe the traffic in wireshark
+5. look for:
+   - http requests to port 7000 (airplay 2 control)
+   - rtsp requests to port 5000 (airplay 1/raop)
+   - tlv8-encoded pairing data
 
-### **Useful Wireshark Filters**
+### **useful wireshark filters**
 ```
-# All AirPlay traffic
+# all airplay traffic
 tcp.port == 7000 or tcp.port == 5000
 
-# mDNS discovery
+# mdns discovery
 udp.port == 5353
 
-# RTP audio packets
+# rtp audio packets
 udp.portrange 6000-6005
 
-# Pair-Setup/Verify
+# pair-setup/verify
 http.request.uri contains "pair"
 ```
 
 ---
 
-## Protocol Documentation
-See [docs/AIRPLAY_PROTOCOL.md](docs/AIRPLAY_PROTOCOL.md) for detailed protocol documentation.
+## protocol documentation
+see [docs/airplay_protocol.md](docs/AIRPLAY_PROTOCOL.md) for detailed protocol documentation.

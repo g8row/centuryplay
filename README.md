@@ -1,194 +1,188 @@
 # centuryplay
 
-📱 Stream audio from your Android device to AirPlay speakers and receivers.
+stream audio from your android device to airplay speakers.
 
-![Android](https://img.shields.io/badge/Android-10%2B-green)
-![AirPlay](https://img.shields.io/badge/AirPlay-v1-blue)
-![License](https://img.shields.io/badge/License-MIT-yellow)
+![android](https://img.shields.io/badge/android-10%2B-green)
+![airplay](https://img.shields.io/badge/airplay-v1-blue)
+![license](https://img.shields.io/badge/license-mit-yellow)
 
-## The Story
+<div align="center">
+  <img src="images/main.png" width="220" />
+  <img src="images/streaming.png" width="220" />
+  <img src="images/settings.png" width="220" />
+</div>
 
-This project started as a way to breathe new life into a **Bang & Olufsen BeoSound Century** - a beautiful 1990s hi-fi system with stunning sound quality but no wireless capabilities. By adding a Raspberry Pi running [shairport-sync](https://github.com/mikebrady/shairport-sync), the Century can now receive AirPlay audio streams, bridging four decades of audio technology.
+<div align="center">
+  <p><i>main interface • active streaming • settings</i></p>
+</div>
 
-centuryplay completes the chain by letting Android devices stream system audio to shairport-sync (or any AirPlay receiver), effectively turning a vintage B&O system into a modern wireless speaker.
+## the story
 
-## Features
+started as a way to breathe new life into a bang & olufsen beosound century - a beautiful 1990s hi-fi system with stunning sound quality but no wireless capabilities. by adding a raspberry pi running [shairport-sync](https://github.com/mikebrady/shairport-sync), the century can now receive airplay streams.
 
-- 🔊 **System Audio Capture** - Stream any audio playing on your device
-- 🔍 **Auto Discovery** - Automatically find AirPlay devices on your network via mDNS/Bonjour
-- 🔐 **Encrypted Streaming** - AES-128-CBC encryption with RSA key exchange
-- ⏱️ **Synchronized Playback** - Proper RTP timing and sync packets for smooth audio
-- 🎚️ **Volume Control** - Adjust volume on the AirPlay receiver
+centuryplay completes the chain by letting android devices stream system audio to shairport-sync (or any airplay receiver), effectively turning a vintage b&o system into a modern wireless speaker.
 
-## Lossless & Hi-Res Audio
+## features
 
-### Does it work with Apple Music Lossless?
+- system audio capture: stream any audio playing on your device.
+- auto discovery: automatically find airplay devices via mdns/bonjour.
+- encrypted streaming: aes-128-cbc encryption with rsa key exchange.
+- synchronized playback: proper rtp timing and sync packets.
+- volume control: adjust volume on the receiver.
+- music player integration: now playing metadata and controls.
 
-**Yes!** When playing Apple Music (or any other source) on Android, this app captures the audio and streams it over AirPlay. However, there are important caveats:
+## lossless & hi-res audio
 
-### Android Audio Resampling Behavior
+### does it work with apple music lossless?
 
-Android's audio pipeline has some quirks that affect lossless playback:
+yes. when playing apple music (or any other source) on android, this app captures the audio and streams it over airplay. however, there are caveats regarding android's audio pipeline.
 
-| Source | Android Behavior | What Gets Streamed |
-|--------|------------------|-------------------|
-| 44.1 kHz (CD Quality) | ✅ No resampling | Bit-perfect (if no mixer interference) |
-| 48 kHz | ✅ Native | Bit-perfect |
-| 96 kHz Hi-Res | ⚠️ Resampled to 48 kHz | Downsampled |
-| 192 kHz Hi-Res | ⚠️ Resampled to 48 kHz | Downsampled |
+### android audio resampling
 
-**Key Points:**
-- Android's AudioFlinger mixer typically runs at 48 kHz
-- Hi-Res content (88.2/96/176.4/192 kHz) gets **downsampled** by Android before it even reaches this app
-- AirPlay 1 only supports 44.1 kHz anyway, so there's additional resampling
-- For true bit-perfect playback, you'd need exclusive USB audio mode (not system audio capture)
+| source | android behavior | stream output |
+|--------|------------------|---------------|
+| 44.1 khz (cd quality) | no resampling | bit-perfect |
+| 48 khz | native | bit-perfect |
+| 96 khz hi-res | resampled to 48 khz | downsampled |
+| 192 khz hi-res | resampled to 48 khz | downsampled |
 
-**Bottom Line:** You get excellent quality audio streaming, but don't expect bit-perfect Hi-Res. CD quality (16-bit/44.1kHz) comes through cleanly, which is perfect for the AirPlay protocol.
+key points:
+- android's mixer typically runs at 48 khz.
+- hi-res content is downsampled by android before reaching this app.
+- airplay 1 only supports 44.1 khz, so additional resampling may occur.
+- for true bit-perfect playback, exclusive usb audio mode would be required.
 
-## Supported Protocols
+bottom line: excellent quality, but not bit-perfect hi-res. cd quality (16-bit/44.1khz) is handled cleanly.
 
-| Protocol | Status | Notes |
+## supported protocols
+
+| protocol | status | notes |
 |----------|--------|-------|
-| AirPlay 1 (RAOP) | ✅ Working | L16 PCM audio, encrypted |
-| AirPlay 2 | 🚧 In Progress | Coming soon |
+| airplay 1 (raop) | working | l16 pcm audio, encrypted |
+| airplay 2 | in progress | coming soon |
 
-## Requirements
+## requirements
 
-- Android 10 (API 29) or higher
-- AirPlay-compatible receiver (e.g., [shairport-sync](https://github.com/mikebrady/shairport-sync), Apple TV, HomePod, AirPort Express)
+- android 10 (api 29) or higher.
+- airplay-compatible receiver (e.g. shairport-sync, apple tv, homepod, airport express).
 
-## Installation
+## installation
 
-### From Source
+### from source
 
-1. Clone the repository:
+1. clone the repository:
    ```bash
    git clone https://github.com/g8row/centuryplay.git
    cd centuryplay
    ```
 
-2. Build with Gradle:
+2. build with gradle:
    ```bash
-   ./gradlew assembleDebug
+   ./gradlew assembledbug
    ```
 
-3. Install the APK:
+3. install the apk:
    ```bash
    adb install app/build/outputs/apk/debug/app-debug.apk
    ```
 
-### From Release
+### from release
 
-Download the latest APK from the [Releases](https://github.com/g8row/centuryplay/releases) page.
+download the latest apk from the [releases](https://github.com/g8row/centuryplay/releases) page.
 
-## Usage
+## usage
 
-1. **Grant Permissions** - The app needs audio recording permission for system audio capture
-2. **Start Media** - Play audio/video on your device
-3. **Select Device** - Tap an AirPlay device from the discovered list
-4. **Allow Capture** - Approve the screen/audio capture prompt
-5. **Stream!** - Audio will now play through your AirPlay speaker
+1. grant permissions: requires audio recording permission for capture.
+2. start media: play audio/video on your device.
+3. select device: tap an airplay device from the list.
+4. allow capture: approve the screen/audio capture prompt.
+5. stream: audio will play through your airplay speaker.
 
-## How It Works
+## how it works
 
-The app uses Android's `AudioPlaybackCapture` API (Android 10+) to capture system audio, then streams it to AirPlay receivers using the RAOP (Remote Audio Output Protocol):
+uses android's `audioplaybackcapture` api to capture system audio, then streams it to airplay receivers using raop (remote audio output protocol).
 
 ```
 ┌─────────────┐     ┌──────────────┐     ┌────────────────┐
-│   Android   │────▶│  AirPlay     │────▶│   AirPlay      │
-│   Device    │     │  Streamer    │     │   Receiver     │
-│  (Audio)    │ PCM │  (This App)  │ RTP │  (Speaker)     │
+│   android   │────▶│  airplay     │────▶│   airplay      │
+│   device    │     │  streamer    │     │   receiver     │
+│  (audio)    │ pcm │  (this app)  │ rtp │  (speaker)     │
 └─────────────┘     └──────────────┘     └────────────────┘
 ```
 
-### Technical Details
+### technical details
 
-- **Audio Format**: L16/44100/2 (16-bit PCM, 44.1kHz, stereo)
-- **Transport**: RTP over UDP
-- **Control**: RTSP over TCP (port 5000)
-- **Encryption**: AES-128-CBC with RSA-OAEP key exchange
-- **Timing**: NTP-style timestamps with sync packets
+- audio format: l16/44100/2 (16-bit pcm, 44.1khz, stereo).
+- transport: rtp over udp.
+- control: rtsp over tcp (port 5000).
+- encryption: aes-128-cbc with rsa-oaep key exchange.
+- timing: ntp-style timestamps with sync packets.
 
-See [docs/AIRPLAY_PROTOCOL.md](docs/AIRPLAY_PROTOCOL.md) for detailed protocol documentation.
+see [docs/airplay_protocol.md](docs/AIRPLAY_PROTOCOL.md) for detailed protocol documentation.
 
-## Tested Receivers
+## tested receivers
 
-| Receiver | Protocol | Status | Notes |
+| receiver | protocol | status | notes |
 |----------|----------|--------|-------|
-| shairport-sync v4.x | AirPlay 1 | ✅ Working | Recommended for testing |
-| shairport-sync v3.x | AirPlay 1 | ✅ Working | |
-| Airport Express | AirPlay 1 | ✅ Working | |
-| Apple TV (Gen 2-3) | AirPlay 1 | ✅ Working | |
-| Apple TV 4K | AirPlay 2 | ⚠️ Requires AirPlay 2 | In development |
-| HomePod / HomePod mini | AirPlay 2 | ⚠️ Requires AirPlay 2 | In development |
-| AirScreen (Android) | AirPlay 1 | ⚠️ Compatibility issues | May not work |
+| shairport-sync v4.x | airplay 1 | working | recommended |
+| shairport-sync v3.x | airplay 1 | working | |
+| airport express | airplay 1 | working | |
+| apple tv (gen 2-3) | airplay 1 | working | |
+| apple tv 4k | airplay 2 | requires airplay 2 | in development |
+| homepod / mini | airplay 2 | requires airplay 2 | in development |
+| airscreen (android)| airplay 1 | issues | compatibility variations |
 
-## Known Limitations
+## limitations
 
-- **DRM Content**: Some apps block audio capture for DRM-protected content (Netflix, Spotify, etc.)
-- **AirPlay 2**: Modern Apple devices may require AirPlay 2 which is still in development
-- **Latency**: There's inherent ~2-3 second latency due to buffering requirements
+- drm content: some apps block capture (netflix etc).
+- latency: inherent ~2s buffer latency.
 
-## Changelog
+## changelog
 
-### v0.2 (January 2026)
-- ✨ Custom animated wavy volume slider
-- 🎨 Material Design 3 UI with expressive theming
-- 🔊 Speaker selection with accent-colored card outline
-- 💫 Bouncy animations for UI transitions
-- 🔔 Improved notification handling (preserves app state)
-- 🛡️ Fixed crash on rapid speaker list tapping
-- 🛡️ Fixed multicast lock release crash on refresh
-- ⏸️ Media pause on disconnect
-- 🔌 Connection health monitoring
-- 📝 Comprehensive protocol documentation
+### v1.0 (january 2026)
+- music player integration: real-time metadata (title, artist, art) and controls.
+- ui polish: minimal aesthetics, lowercase typography, neutral status indicators.
+- settings: keep screen on, auto-connect, and layout fixes.
+- technical: project configuration updated for stable release.
 
-### v0.1 (December 2025)
-- Initial release
-- AirPlay 1 (RAOP) support
-- mDNS device discovery
-- Encrypted audio streaming
+### v0.2 (january 2026)
+- wavy volume slider.
+- material 3 theming.
+- connection monitoring.
+- crash fixes.
 
-## Development
+### v0.1 (december 2025)
+- initial release.
+- airplay 1 (raop) support.
+- mdns device discovery.
+- encrypted audio streaming.
 
-See [DEVELOPMENT.md](DEVELOPMENT.md) for build instructions and development notes.
+## development
 
-### Tech Stack
+see [development.md](DEVELOPMENT.md) for notes.
 
-- **Language**: Kotlin
-- **UI**: Android Views with ViewBinding (no Compose)
-- **Architecture**: MVVM with StateFlow
-- **Concurrency**: Kotlin Coroutines + Flow
-- **Networking**: Raw sockets (RTSP/RTP), jmDNS for mDNS discovery
-- **Crypto**: BouncyCastle for RSA/AES encryption
-- **Min SDK**: 29 (Android 10) - required for AudioPlaybackCapture API
+### tech stack
 
-### Project Structure
+- language: kotlin
+- ui: android views (viewbinding)
+- architecture: mvvm + stateflow
+- concurrency: coroutines + flow
+- networking: raw sockets, jmdns
+- crypto: bouncycastle
 
-```
-app/src/main/java/com/airplay/streamer/
-├── MainActivity.kt          # Main UI
-├── discovery/               # mDNS service discovery
-├── raop/                    # AirPlay 1 (RAOP) client
-│   ├── RaopClient.kt       # Main RAOP implementation
-│   └── AlacEncoder.kt      # ALAC encoder (optional)
-├── service/                 # Audio capture service
-└── util/                    # Utilities
-```
+## contributing
 
-## Contributing
+contributions welcome. submit a pull request.
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+## license
 
-## License
+mit license. see [license](LICENSE) file.
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## acknowledgments
 
-## Acknowledgments
-
-- [shairport-sync](https://github.com/mikebrady/shairport-sync) - Reference implementation and testing
-- [Unofficial AirPlay Protocol Spec](https://nto.github.io/AirPlay.html) - Protocol documentation
+- [shairport-sync](https://github.com/mikebrady/shairport-sync)
+- [unofficial airplay protocol spec](https://nto.github.io/AirPlay.html)
 
 ---
 
-**Disclaimer**: AirPlay is a trademark of Apple Inc. This project is not affiliated with or endorsed by Apple Inc.
+disclaimer: airplay is a trademark of apple inc. this project is not affiliated with apple inc.

@@ -1,108 +1,108 @@
-# AirPlay 1 (RAOP) Protocol Documentation
+# airplay 1 (raop) protocol documentation
 
-> **Status**: Comprehensive reference based on reverse engineering and implementation
-> **Last Updated**: January 2026
+> **status**: comprehensive reference based on reverse engineering and implementation
+> **last updated**: january 2026
 
-This document provides a complete reference for the AirPlay 1 protocol (also known as RAOP - Remote Audio Output Protocol), based on reverse engineering and implementation experience with shairport-sync receivers.
+this document provides a complete reference for the airplay 1 protocol (also known as raop - remote audio output protocol), based on reverse engineering and implementation experience with shairport-sync receivers.
 
-## Table of Contents
+## table of contents
 
-1. [Overview](#overview)
-2. [Protocol Architecture](#protocol-architecture)
-3. [RTSP Control Protocol](#rtsp-control-protocol)
-4. [Session Establishment](#session-establishment)
-5. [Audio Streaming](#audio-streaming)
-6. [Time Synchronization](#time-synchronization)
-7. [Encryption](#encryption)
-8. [Troubleshooting](#troubleshooting)
-9. [Quick Reference](#quick-reference)
+1. [overview](#overview)
+2. [protocol architecture](#protocol-architecture)
+3. [rtsp control protocol](#rtsp-control-protocol)
+4. [session establishment](#session-establishment)
+5. [audio streaming](#audio-streaming)
+6. [time synchronization](#time-synchronization)
+7. [encryption](#encryption)
+8. [troubleshooting](#troubleshooting)
+9. [quick reference](#quick-reference)
 
 ---
 
-## Overview
+## overview
 
-AirPlay 1 is Apple's proprietary audio streaming protocol, introduced circa 2004 as "AirTunes" and later renamed to AirPlay. It enables wireless audio streaming from a sender (client) to a receiver (speaker/server).
+airplay 1 is apple's proprietary audio streaming protocol, introduced circa 2004 as "airtunes" and later renamed to airplay. it enables wireless audio streaming from a sender (client) to a receiver (speaker/server).
 
-### Key Characteristics
+### key characteristics
 
-| Property | Value |
+| property | value |
 |----------|-------|
-| Control Protocol | RTSP (Real-Time Streaming Protocol) |
-| Control Port | TCP 5000 (default) |
-| Audio Transport | RTP over UDP |
-| Audio Format | L16/44100/2 (16-bit PCM, 44.1kHz, stereo) or encrypted ALAC |
-| Encryption | AES-128-CBC with RSA key exchange |
-| Discovery | mDNS/Bonjour (`_raop._tcp`) |
+| control protocol | rtsp (real-time streaming protocol) |
+| control port | tcp 5000 (default) |
+| audio transport | rtp over udp |
+| audio format | l16/44100/2 (16-bit pcm, 44.1khz, stereo) or encrypted alac |
+| encryption | aes-128-cbc with rsa key exchange |
+| discovery | mdns/bonjour (`_raop._tcp`) |
 
-### Protocol Flow Summary
+### protocol flow summary
 
 ```
-Client                                    Server (Receiver)
+client                                    server (receiver)
    |                                           |
-   |  ---- OPTIONS (capabilities) -----------> |
-   |  <-------- 200 OK ----------------------- |
+   |  ---- options (capabilities) -----------> |
+   |  <-------- 200 ok ----------------------- |
    |                                           |
-   |  ---- ANNOUNCE (SDP with format) -------> |
-   |  <-------- 200 OK ----------------------- |
+   |  ---- announce (sdp with format) -------> |
+   |  <-------- 200 ok ----------------------- |
    |                                           |
-   |  ---- SETUP (port negotiation) ---------> |
-   |  <-------- 200 OK (ports) --------------- |
+   |  ---- setup (port negotiation) ---------> |
+   |  <-------- 200 ok (ports) --------------- |
    |                                           |
-   |  ---- RECORD (start streaming) ---------> |
-   |  <-------- 200 OK ----------------------- |
+   |  ---- record (start streaming) ---------> |
+   |  <-------- 200 ok ----------------------- |
    |                                           |
-   |  ==== UDP: Timing packets <==============>| (bidirectional)
-   |  ==== UDP: Sync packets ================> | (client to server)
-   |  ==== UDP: Audio RTP packets ==========> | (client to server)
+   |  ==== udp: timing packets <==============>| (bidirectional)
+   |  ==== udp: sync packets ================> | (client to server)
+   |  ==== udp: audio rtp packets ==========> | (client to server)
    |                                           |
-   |  ---- SET_PARAMETER (volume, etc) ------> |
-   |  <-------- 200 OK ----------------------- |
+   |  ---- set_parameter (volume, etc) ------> |
+   |  <-------- 200 ok ----------------------- |
    |                                           |
-   |  ---- TEARDOWN (end session) -----------> |
-   |  <-------- 200 OK ----------------------- |
+   |  ---- teardown (end session) -----------> |
+   |  <-------- 200 ok ----------------------- |
 ```
 
 ---
 
-## Protocol Architecture
+## protocol architecture
 
-### Network Ports
+### network ports
 
-AirPlay 1 uses multiple ports for different purposes:
+airplay 1 uses multiple ports for different purposes:
 
-| Port Type | Protocol | Direction | Purpose |
+| port type | protocol | direction | purpose |
 |-----------|----------|-----------|---------|
-| RTSP Control | TCP | Bidirectional | Session control, commands |
-| Audio | UDP | Client → Server | RTP audio packets |
-| Control | UDP | Client → Server | Sync/timing control packets |
-| Timing | UDP | Bidirectional | NTP-like time synchronization |
+| rtsp control | tcp | bidirectional | session control, commands |
+| audio | udp | client → server | rtp audio packets |
+| control | udp | client → server | sync/control packets |
+| timing | udp | bidirectional | ntp-like time synchronization |
 
-**Default Port Ranges:**
-- RTSP: TCP 5000
-- UDP Base: 6001 (control), 6002 (timing), 6003 (audio)
+**default port ranges:**
+- rtsp: tcp 5000
+- udp base: 6001 (control), 6002 (timing), 6003 (audio)
 
-### Client Identifiers
+### client identifiers
 
-Each AirPlay client must provide several identifiers:
+each airplay client must provide several identifiers:
 
 ```
-Client-Instance: 9910F4FAD33B72F1  (16 hex chars, random)
-DACP-ID: 9910F4FAD33B72F1          (same as Client-Instance)
-Active-Remote: 1478837813          (random 32-bit integer as string)
+client-instance: 9910f4fad33b72f1  (16 hex chars, random)
+dacp-id: 9910f4fad33b72f1          (same as client-instance)
+active-remote: 1478837813          (random 32-bit integer as string)
 ```
 
-**Purpose:**
-- `Client-Instance`: Unique identifier for this client session
-- `DACP-ID`: Digital Audio Control Protocol ID for remote control
-- `Active-Remote`: Used for bidirectional remote control communication
+**purpose:**
+- `client-instance`: unique identifier for this client session
+- `dacp-id`: digital audio control protocol id for remote control
+- `active-remote`: used for bidirectional remote control communication
 
 ---
 
-## RTSP Control Protocol
+## rtsp control protocol
 
-All RTSP messages follow this format:
+all rtsp messages follow this format:
 
-### Request Format
+### request format
 ```
 METHOD rtsp://host/session RTSP/1.0
 CSeq: <sequence_number>
@@ -115,7 +115,7 @@ Active-Remote: <number>
 [Body if Content-Length > 0]
 ```
 
-### Response Format
+### response format
 ```
 RTSP/1.0 <status_code> <reason>
 CSeq: <matching_sequence_number>
@@ -125,23 +125,23 @@ Server: AirTunes/105.1
 [Body if Content-Length > 0]
 ```
 
-### Common Status Codes
-| Code | Meaning |
+### common status codes
+| code | meaning |
 |------|---------|
-| 200 | OK - Success |
-| 400 | Bad Request |
-| 453 | Not Enough Bandwidth |
-| 501 | Not Implemented |
+| 200 | ok - success |
+| 400 | bad request |
+| 453 | not enough bandwidth |
+| 501 | not implemented |
 
 ---
 
-## Session Establishment
+## session establishment
 
-### Step 1: OPTIONS (Optional but Recommended)
+### step 1: options (optional but recommended)
 
-Tests server connectivity and retrieves capabilities.
+tests server connectivity and retrieves capabilities.
 
-**Request:**
+**request:**
 ```
 OPTIONS * RTSP/1.0
 CSeq: 1
@@ -152,7 +152,7 @@ Active-Remote: 1478837813
 Apple-Challenge: lY5pmgHcGK2IJ8RnKnUb9w==
 ```
 
-**Response:**
+**response:**
 ```
 RTSP/1.0 200 OK
 CSeq: 1
@@ -161,16 +161,16 @@ Public: ANNOUNCE, SETUP, RECORD, PAUSE, FLUSH, TEARDOWN, OPTIONS, GET_PARAMETER,
 Apple-Response: <base64_challenge_response>
 ```
 
-**Apple-Challenge/Response:**
-- Challenge: 16 random bytes, Base64 encoded
-- Response: RSA signature proving server has the private key
-- Used to verify authentic AirPlay receivers
+**apple-challenge/response:**
+- challenge: 16 random bytes, base64 encoded
+- response: rsa signature proving server has the private key
+- used to verify authentic airplay receivers
 
-### Step 2: ANNOUNCE
+### step 2: announce
 
-Describes the audio format and provides encryption keys.
+describes the audio format and provides encryption keys.
 
-**Request:**
+**request:**
 ```
 ANNOUNCE rtsp://192.168.1.220/7981095476330793800 RTSP/1.0
 CSeq: 2
@@ -193,29 +193,29 @@ a=rsaaeskey:<base64_encrypted_aes_key>
 a=aesiv:<base64_iv>
 ```
 
-**SDP Fields Explained:**
+**sdp fields explained:**
 
-| Field | Meaning |
+| field | meaning |
 |-------|---------|
-| `v=0` | SDP version |
-| `o=iTunes <session_id> 0 IN IP4 <client_ip>` | Origin (sender info) |
-| `s=iTunes` | Session name |
-| `c=IN IP4 <server_ip>` | Connection (receiver IP) |
-| `t=0 0` | Time (always 0 0 for streaming) |
-| `m=audio 0 RTP/AVP 96` | Media line: audio, port 0 (negotiated later), RTP, payload type 96 |
-| `a=rtpmap:96 L16/44100/2` | Payload 96 is L16, 44100Hz, 2 channels |
-| `a=rsaaeskey:<key>` | RSA-encrypted AES key (if encrypted) |
-| `a=aesiv:<iv>` | AES initialization vector (if encrypted) |
+| `v=0` | sdp version |
+| `o=itunes <session_id> 0 in ip4 <client_ip>` | origin (sender info) |
+| `s=itunes` | session name |
+| `c=in ip4 <server_ip>` | connection (receiver ip) |
+| `t=0 0` | time (always 0 0 for streaming) |
+| `m=audio 0 rtp/avp 96` | media line: audio, port 0, rtp, payload 96 |
+| `a=rtpmap:96 l16/44100/2` | payload 96 is l16, 44100hz, 2 channels |
+| `a=rsaaeskey:<key>` | rsa-encrypted aes key (if encrypted) |
+| `a=aesiv:<iv>` | aes initialization vector (if encrypted) |
 
-**Audio Format Options:**
-- `L16/44100/2` - Uncompressed 16-bit PCM (simpler, higher bandwidth)
-- `AppleLossless` - ALAC compressed (more complex, lower bandwidth)
+**audio format options:**
+- `l16/44100/2` - uncompressed 16-bit pcm (simpler, higher bandwidth)
+- `applelossless` - alac compressed (more complex, lower bandwidth)
 
-### Step 3: SETUP
+### step 3: setup
 
-Negotiates UDP ports for audio, control, and timing.
+negotiates udp ports for audio, control, and timing.
 
-**Request:**
+**request:**
 ```
 SETUP rtsp://192.168.1.220/7981095476330793800 RTSP/1.0
 CSeq: 3
@@ -226,7 +226,7 @@ Active-Remote: 1478837813
 Transport: RTP/AVP/UDP;unicast;interleaved=0-1;mode=record;control_port=57099;timing_port=58571
 ```
 
-**Response:**
+**response:**
 ```
 RTSP/1.0 200 OK
 CSeq: 3
@@ -235,23 +235,23 @@ Transport: RTP/AVP/UDP;unicast;interleaved=0-1;mode=record;control_port=6001;tim
 Session: 1
 ```
 
-**Transport Header Parameters:**
+**transport header parameters:**
 
-| Parameter | Meaning |
+| parameter | meaning |
 |-----------|---------|
-| `RTP/AVP/UDP` | RTP Audio/Video Profile over UDP |
-| `unicast` | Point-to-point (not multicast) |
-| `interleaved=0-1` | Channel interleaving |
-| `mode=record` | Client is sending (not receiving) |
-| `control_port` | UDP port for sync/control packets |
-| `timing_port` | UDP port for time synchronization |
-| `server_port` | Server's audio receive port |
+| `rtp/avp/udp` | rtp audio/video profile over udp |
+| `unicast` | point-to-point (not multicast) |
+| `interleaved=0-1` | channel interleaving |
+| `mode=record` | client is sending (not receiving) |
+| `control_port` | udp port for sync/control packets |
+| `timing_port` | udp port for time synchronization |
+| `server_port` | server's audio receive port |
 
-### Step 4: RECORD
+### step 4: record
 
-Starts the streaming session.
+starts the streaming session.
 
-**Request:**
+**request:**
 ```
 RECORD rtsp://192.168.1.220/7981095476330793800 RTSP/1.0
 CSeq: 4
@@ -264,11 +264,11 @@ Range: npt=0-
 RTP-Info: seq=10727;rtptime=4234197534
 ```
 
-**RTP-Info Header:**
-- `seq`: Starting RTP sequence number (16-bit, random initial value)
-- `rtptime`: Starting RTP timestamp (32-bit, random initial value)
+**rtp-info header:**
+- `seq`: starting rtp sequence number (16-bit, random initial value)
+- `rtptime`: starting rtp timestamp (32-bit, random initial value)
 
-**Response:**
+**response:**
 ```
 RTSP/1.0 200 OK
 CSeq: 4
@@ -276,14 +276,14 @@ Server: AirTunes/105.1
 Audio-Latency: 11025
 ```
 
-**Audio-Latency:** Server's internal latency in samples (at 44100Hz)
+**audio-latency:** server's internal latency in samples (at 44100hz)
 - 11025 samples = 250ms
 
-### Step 5: SET_PARAMETER (Optional)
+### step 5: set_parameter (optional)
 
-Sets volume and other parameters during playback.
+sets volume and other parameters during playback.
 
-**Volume Request:**
+**volume request:**
 ```
 SET_PARAMETER rtsp://192.168.1.220/7981095476330793800 RTSP/1.0
 CSeq: 5
@@ -297,16 +297,16 @@ Content-Length: 14
 volume: -6.000
 ```
 
-**Volume Scale:**
-- `-144.0` = Mute
-- `-30.0` = Very quiet
-- `0.0` = Maximum volume
+**volume scale:**
+- `-144.0` = mute
+- `-30.0` = very quiet
+- `0.0` = maximum volume
 
-### Step 6: TEARDOWN
+### step 6: teardown
 
-Ends the session and releases resources.
+ends the session and releases resources.
 
-**Request:**
+**request:**
 ```
 TEARDOWN rtsp://192.168.1.220/7981095476330793800 RTSP/1.0
 CSeq: 6
@@ -319,104 +319,104 @@ Session: 1
 
 ---
 
-## Audio Streaming
+## audio streaming
 
-### RTP Packet Format
+### rtp packet format
 
-Audio is sent as RTP packets over UDP to the server's audio port.
+audio is sent as rtp packets over udp to the server's audio port.
 
 ```
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|V=2|P|X|  CC   |M|     PT      |       Sequence Number         |
+|v=2|p|x|  cc   |m|     pt      |       sequence number         |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                           Timestamp                           |
+|                           timestamp                           |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                              SSRC                             |
+|                              ssrc                             |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                         Audio Payload                         |
+|                         audio payload                         |
 |                             ...                               |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ```
 
-**Header Fields (12 bytes):**
+**header fields (12 bytes):**
 
-| Field | Bits | Value | Description |
+| field | bits | value | description |
 |-------|------|-------|-------------|
-| V | 2 | 2 | RTP version |
-| P | 1 | 0 | Padding flag |
-| X | 1 | 0 | Extension flag |
-| CC | 4 | 0 | CSRC count |
-| M | 1 | 0 | Marker bit |
-| PT | 7 | 96 | Payload type (dynamic) |
-| Sequence | 16 | varies | Packet sequence (wraps at 65535) |
-| Timestamp | 32 | varies | RTP timestamp (samples) |
-| SSRC | 32 | random | Synchronization source ID |
+| v | 2 | 2 | rtp version |
+| p | 1 | 0 | padding flag |
+| x | 1 | 0 | extension flag |
+| cc | 4 | 0 | csrc count |
+| m | 1 | 0 | marker bit |
+| pt | 7 | 96 | payload type (dynamic) |
+| sequence | 16 | varies | packet sequence (wraps at 65535) |
+| timestamp | 32 | varies | rtp timestamp (samples) |
+| ssrc | 32 | random | synchronization source id |
 
-### L16 Audio Payload
+### l16 audio payload
 
-For uncompressed PCM (L16/44100/2):
+for uncompressed pcm (l16/44100/2):
 
-- **Byte Order:** Big-endian (network byte order) - **CRITICAL!**
-- **Sample Size:** 16 bits per sample
-- **Channels:** 2 (stereo, interleaved: L, R, L, R, ...)
-- **Samples per Packet:** 352 frames (352 × 4 = 1408 bytes)
-- **Sample Rate:** 44100 Hz
+- **byte order:** big-endian (network byte order) - **critical!**
+- **sample size:** 16 bits per sample
+- **channels:** 2 (stereo, interleaved: l, r, l, r, ...)
+- **samples per packet:** 352 frames (352 × 4 = 1408 bytes)
+- **sample rate:** 44100 hz
 
-**Important:** Android's AudioRecord provides little-endian samples. You MUST convert to big-endian before sending!
+**important:** android's audiorecord provides little-endian samples. you must convert to big-endian before sending!
 
 ```kotlin
-// Swap bytes for 16-bit samples (little-endian → big-endian)
+// swap bytes for 16-bit samples (little-endian → big-endian)
 fun swapEndianness(data: ByteArray): ByteArray {
     val result = ByteArray(data.size)
     for (i in 0 until data.size step 2) {
-        result[i] = data[i + 1]      // High byte first
-        result[i + 1] = data[i]      // Low byte second
+        result[i] = data[i + 1]      // high byte first
+        result[i + 1] = data[i]      // low byte second
     }
     return result
 }
 ```
 
-### Timestamp Progression
+### timestamp progression
 
-The RTP timestamp increments by the number of audio frames per packet:
+the rtp timestamp increments by the number of audio frames per packet:
 
 ```
-Initial timestamp: T₀ (random 32-bit value)
-After packet 1: T₀ + 352
-After packet 2: T₀ + 704
-After packet N: T₀ + (N × 352)
+initial timestamp: t₀ (random 32-bit value)
+after packet 1: t₀ + 352
+after packet 2: t₀ + 704
+after packet n: t₀ + (n × 352)
 ```
 
-Timestamp wraps at 2³² (4,294,967,296).
+timestamp wraps at 2³² (4,294,967,296).
 
 ---
 
-## Time Synchronization
+## time synchronization
 
-Time sync is **CRITICAL** for audio playback. Without it, the receiver doesn't know when to play audio frames.
+time sync is **critical** for audio playback. without it, the receiver doesn't know when to play audio frames.
 
-### NTP Timestamps
+### ntp timestamps
 
-AirPlay uses NTP-style timestamps (64-bit):
-- **Seconds:** 32-bit, seconds since January 1, 1900
-- **Fraction:** 32-bit, fractional seconds (2³² = 1 second)
+airplay uses ntp-style timestamps (64-bit):
+- **seconds:** 32-bit, seconds since january 1, 1900
+- **fraction:** 32-bit, fractional seconds (2³² = 1 second)
 
 ```kotlin
-// Convert Unix milliseconds to NTP timestamp
-val ntpSec = (unixMillis / 1000) + 2208988800L  // Unix epoch → NTP epoch
+// convert unix milliseconds to ntp timestamp
+val ntpSec = (unixMillis / 1000) + 2208988800L  // unix epoch → ntp epoch
 val ntpFrac = ((unixMillis % 1000) * 4294967296.0 / 1000.0).toLong()
 ```
 
-**Epoch Difference:** NTP epoch is January 1, 1900. Unix epoch is January 1, 1970.
-- Difference: 2,208,988,800 seconds (70 years)
+**epoch difference:** ntp epoch is january 1, 1900. unix epoch is january 1, 1970.
+- difference: 2,208,988,800 seconds (70 years)
 
-### Timing Protocol (Port 6002)
+### timing protocol (port 6002)
 
-The receiver sends timing requests, client must respond.
+the receiver sends timing requests, client must respond.
 
-**Timing Request (32 bytes):**
+**timing request (32 bytes):**
 ```
 Bytes 0-7:   Header
 Bytes 8-15:  Origin timestamp (T₁) - filled on reply
@@ -424,7 +424,7 @@ Bytes 16-23: Receive timestamp (T₂) - filled on reply
 Bytes 24-31: Transmit timestamp (T₃) - when server sent request
 ```
 
-**Timing Response (32 bytes):**
+**timing response (32 bytes):**
 ```
 Byte 0:      0x80 (RTP version 2)
 Byte 1:      0xD3 (0x53 | 0x80 = timing reply)
@@ -434,245 +434,207 @@ Bytes 16-23: T_recv = when we received the request
 Bytes 24-31: T_xmit = when we're sending the reply
 ```
 
-### Sync/Control Protocol (Port 6001)
+### sync/control protocol (port 6001)
 
-The client MUST send sync packets to tell the receiver the RTP-to-NTP time mapping.
+the client must send sync packets to tell the receiver the rtp-to-ntp time mapping.
 
-**Sync Packet (20 bytes):**
+**sync packet (20 bytes):**
 ```
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|V=2|P|X|  CC   |M|   PT=0xD4   |       Sequence Number         |
+|v=2|p|x|  cc   |m|   pt=0xd4   |       sequence number         |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                    Current RTP Timestamp                      |
+|                    current rtp timestamp                      |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                                                               |
-|                   NTP Timestamp (64-bit)                      |
+|                   ntp timestamp (64-bit)                      |
 |                                                               |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                     Next RTP Timestamp                        |
+|                     next rtp timestamp                        |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ```
 
-**Fields:**
-| Offset | Size | Field | Description |
+**fields:**
+| offset | size | field | description |
 |--------|------|-------|-------------|
-| 0 | 1 | Header | 0x90 (first packet) or 0x80 (subsequent) |
-| 1 | 1 | Type | 0xD4 (payload type 84 = sync) |
-| 2 | 2 | Sequence | Sync packet sequence number |
-| 4 | 4 | RTP Time | RTP timestamp to play at NTP time |
-| 8 | 8 | NTP Time | When the RTP timestamp should play |
-| 16 | 4 | Next RTP | Next sync point (RTP + latency) |
+| 0 | 1 | header | 0x90 (first packet) or 0x80 (subsequent) |
+| 1 | 1 | type | 0xd4 (payload type 84 = sync) |
+| 2 | 2 | sequence | sync packet sequence number |
+| 4 | 4 | rtp time | rtp timestamp to play at ntp time |
+| 8 | 8 | ntp time | when the rtp timestamp should play |
+| 16 | 4 | next rtp | next sync point (rtp + latency) |
 
-### Sync Timing Logic (CRITICAL!)
+### sync timing logic (critical!)
 
-The sync packet answers: "When should the receiver play RTP timestamp X?"
+the sync packet answers: "when should the receiver play rtp timestamp x?"
 
-**Latency Concept:**
-- The receiver needs time to buffer audio before playback
-- Standard latency: ~2.5 seconds (110,250 samples at 44100Hz)
-- Sync tells receiver: "Play RTP timestamp X at time (NOW + latency)"
+**latency concept:**
+- the receiver needs time to buffer audio before playback
+- standard latency: ~2.5 seconds (110,250 samples at 44100hz)
+- sync tells receiver: "play rtp timestamp x at time (now + latency)"
 
 ```kotlin
-// CORRECT sync timing
+// correct sync timing
 val latencyMs = 2500L  // 2.5 seconds
 val latencySamples = latencyMs * 44100 / 1000  // 110250 samples
 
-// When sending sync packet:
+// when sending sync packet:
 val elapsedMs = System.currentTimeMillis() - streamStartTimeMs
 val elapsedSamples = elapsedMs * 44100 / 1000
 val currentPlayRtp = startRtpTimestamp + elapsedSamples
-val playTimeNtp = System.currentTimeMillis() + latencyMs  // Future time!
+val playTimeNtp = System.currentTimeMillis() + latencyMs  // future time!
 ```
 
-**Common Mistake:** Sending `rtpTimestamp` with `now` instead of `now + latency`. This causes "Dropping out of date packet" errors because the receiver thinks audio should have played already.
+**common mistake:** sending `rtptimestamp` with `now` instead of `now + latency`. this causes "dropping out of date packet" errors.
 
-**Send sync packets every ~300ms** to keep the receiver's clock aligned.
+**send sync packets every ~300ms** to keep the receiver's clock aligned.
 
 ---
 
-## Encryption
+## encryption
 
-### Overview
+### overview
 
-AirPlay 1 uses hybrid encryption:
-1. **RSA:** Encrypts the AES key during ANNOUNCE
-2. **AES-128-CBC:** Encrypts audio data in each RTP packet
+airplay 1 uses hybrid encryption:
+1. **rsa:** encrypts the aes key during announce
+2. **aes-128-cbc:** encrypts audio data in each rtp packet
 
-### RSA Key Exchange
+### rsa key exchange
 
-Apple's well-known public key (2048-bit RSA):
+apple's well-known public key (2048-bit rsa):
 
 ```
-Modulus (Base64):
-59dE8qLieItsH1WgjrcFRKj6eUWqi+bGLOX1HL3U3GhC/j0Qg90u3sG/1CUtwC
-5vOYvfDmFI6oSFXi5ELabWJmT2dKHzBJKa3k9ok+8t9ucRqMd6DZHJ2YCCLlDR
-KSKv6kDqnw4UwPdpOMXziC/AMj3Z/lUVX1G7WSHCAWKf1zNS1eLvqr+boEjXuB
-OitnZ/bDzPHrTOZz0Dew0uowxf/+sG+NCK3eQJVxqcaJ/vEHKIVd2M+5qL71yJ
-Q+87X6oV3eaYvt3zWZYD6z5vYTcrtij2VZ9Zmni/UAaHqn9JdsBWLUEpVviYnh
-imNVvYFZeCXg/IdTQ+x4IRdiXNv5hEew==
+modulus (base64):
+59de8qlieitsh1wgjrcfrkj6euwqi+bglox1hl3u3ghc/j0qg90u3sg/1cutwc
+5voyvfdmfi6osfxi5elabwjmT2dkhzbjkak9ok+8t9ucrqmd6dzhj2ycclldr
+kskv6kdqnw4uwpdpomxic/amj3z/lurx1g7wshcawkf1zns1elvqr+boejxub
+oitnz/bdzphrtozz0dew0uowxf/+sg+nck3eqjvxqcaj/vehkivd2m+5ql71yj
+q+87x6ov3eayvt3zwzyd6z5vytcrtij2vz9zmni/uahqq9jdsbwluepviymnh
+imnvvyfzecxg/idtq+x4irdixnv5heew==
 
-Exponent (Base64):
-AQAB (= 65537)
+exponent (base64):
+aqab (= 65537)
 ```
 
-**RSA Padding:** RSA-OAEP with SHA-1 and MGF1
+**rsa padding:** rsa-oaep with sha-1 and mgf1
 
 ```kotlin
-// CORRECT padding for shairport-sync compatibility
+// correct padding for shairport-sync compatibility
 val cipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA-1AndMGF1Padding")
 cipher.init(Cipher.ENCRYPT_MODE, publicKey)
 val encryptedAesKey = cipher.doFinal(aesKey)
 ```
 
-**Note:** PKCS1v1.5 padding does NOT work with shairport-sync!
+**note:** pkcs1v1.5 padding does not work with shairport-sync!
 
-### AES Audio Encryption
+### aes audio encryption
 
-Each RTP audio packet is encrypted independently:
+each rtp audio packet is encrypted independently:
 
-1. Generate random 16-byte AES key and 16-byte IV (once per session)
-2. For each packet:
-   - Use AES-128-CBC with NoPadding
-   - Reset cipher to original IV for each packet (no chaining between packets!)
-   - Only encrypt complete 16-byte blocks
-   - Leave remaining bytes (< 16) unencrypted at end
+1. generate random 16-byte aes key and 16-byte iv (once per session)
+2. for each packet:
+   - use aes-128-cbc with nopadding
+   - reset cipher to original iv for each packet (no chaining!)
+   - only encrypt complete 16-byte blocks
+   - leave remaining bytes (< 16) unencrypted at end
 
 ```kotlin
 fun encryptAudio(data: ByteArray, aesKey: ByteArray, aesIv: ByteArray): ByteArray {
-    val cipher = Cipher.getInstance("AES/CBC/NoPadding")
-    cipher.init(Cipher.ENCRYPT_MODE, 
-                SecretKeySpec(aesKey, "AES"),
-                IvParameterSpec(aesIv))
-    
-    val blockSize = 16
-    val numBlocks = data.size / blockSize
-    val encryptedSize = numBlocks * blockSize
-    
-    if (encryptedSize == 0) return data
-    
-    val encrypted = cipher.doFinal(data.copyOfRange(0, encryptedSize))
-    
-    // Append unencrypted remainder (if any)
-    return if (encryptedSize < data.size) {
-        encrypted + data.copyOfRange(encryptedSize, data.size)
-    } else {
-        encrypted
-    }
+    // ...
 }
 ```
 
-### Why Encryption Might Not Be Detected
+### why encryption might not be detected
 
-If your SDP in ANNOUNCE doesn't include `rsaaeskey` and `aesiv` lines, the receiver will expect unencrypted audio. The receiver logs will show "An uncompressed PCM stream has been detected" for L16 without encryption.
+if your sdp in announce doesn't include `rsaaeskey` and `aesiv` lines, the receiver will expect unencrypted audio.
 
-**With encryption (SDP includes):**
+**with encryption (sdp includes):**
 ```
 a=rsaaeskey:<base64_encrypted_aes_key>
 a=aesiv:<base64_iv>
 ```
 
-**Without encryption (SDP omits those lines):**
-The receiver treats audio as plaintext L16 PCM.
+**without encryption (sdp omits those lines):**
+the receiver treats audio as plaintext l16 pcm.
 
-**Important Note:** Even when using L16 format with encryption keys properly sent, shairport-sync may still log "An uncompressed PCM stream has been detected" because:
-1. L16 is indeed uncompressed (vs ALAC which is compressed)
-2. The "uncompressed" refers to the audio codec, not the encryption status
-3. Encryption happens at the transport layer (AES-CBC on the RTP payload), not codec level
-
-To verify encryption is working:
-- Check that your ANNOUNCE SDP includes `a=rsaaeskey:` and `a=aesiv:` lines
-- If encryption was rejected, shairport-sync would log an RSA decryption error
-- Audio playing correctly with encryption keys = encryption is working
+to verify encryption is working:
+- check that your announce sdp includes `a=rsaaeskey:` and `a=aesiv:` lines
+- audio playing correctly with encryption keys = encryption is working
 
 ---
 
-## Troubleshooting
+## troubleshooting
 
-### Common Issues
+### common issues
 
-#### "Dropping out of date packet"
+#### "dropping out of date packet"
 
-**Symptom:** Logs show packets being dropped, no audio plays.
-
-**Cause:** Sync timing is wrong. The sync packet is telling the receiver to play audio "now" but the packets haven't arrived yet (or arrived too late).
-
-**Solution:** Ensure sync packet uses future playback time:
+**symptom:** logs show packets being dropped, no audio plays.
+**cause:** sync timing is wrong.
+**solution:** ensure sync packet uses future playback time:
 ```
 playTimeNtp = NOW + latency_ms (e.g., 2500ms)
 ```
 
-#### "Not enough samples to estimate drift"
+#### "not enough samples to estimate drift"
 
-**Symptom:** Warning during initial connection.
+**symptom:** warning during initial connection.
+**cause:** normal - receiver needs multiple timing samples.
+**solution:** keep sending timing responses.
 
-**Cause:** Normal - receiver needs multiple timing samples.
+#### audio is garbled/static
 
-**Solution:** Keep sending timing responses. This resolves automatically.
+**symptom:** audio plays but sounds wrong.
+**causes:**
+1. **byte order:** l16 requires big-endian.
+2. **encryption mismatch:** server expects encrypted but receiving unencrypted.
+3. **sample rate mismatch:** must be exactly 44100hz.
 
-#### Audio is garbled/static
+#### connection timeout during announce
 
-**Symptom:** Audio plays but sounds wrong.
+**symptom:** announce request times out.
+**causes:**
+1. server is airplay 2 only
+2. firewall blocking ports
+3. sdp format error
 
-**Causes:**
-1. **Byte order:** L16 requires big-endian. Android provides little-endian.
-2. **Encryption mismatch:** Server expects encrypted but receiving unencrypted, or vice versa.
-3. **Sample rate mismatch:** Must be exactly 44100Hz.
+#### rsa decryption failed
 
-#### Connection timeout during ANNOUNCE
+**symptom:** shairport-sync logs show rsa decryption error.
+**cause:** wrong rsa padding scheme.
+**solution:** use `rsa/ecb/oaepwithsha-1andmgf1padding`.
 
-**Symptom:** ANNOUNCE request times out.
+### debug logging
 
-**Causes:**
-1. Server is AirPlay 2 only (doesn't support AirPlay 1)
-2. Firewall blocking ports
-3. SDP format error
-
-#### RSA decryption failed
-
-**Symptom:** shairport-sync logs show RSA decryption error.
-
-**Cause:** Wrong RSA padding scheme.
-
-**Solution:** Use `RSA/ECB/OAEPWithSHA-1AndMGF1Padding`, not PKCS1v1.5.
-
-### Debug Logging
-
-Run shairport-sync with verbose logging:
+run shairport-sync with verbose logging:
 ```bash
 shairport-sync --name=MyReceiver -vvvv -o pa 2>&1 | tee /tmp/shairport.log
 ```
 
-Key log messages:
-- `Accepting packet X with timestamp Y. Lead time is Z seconds.` ✓ Good!
-- `Dropping out of date packet` ✗ Sync timing wrong
-- `An uncompressed PCM stream has been detected` - L16 mode (check if expected)
-- `RSA OAEP decryption` - encryption handshake occurring
-
 ---
 
-## Quick Reference
+## quick reference
 
-### Packet Types
+### packet types
 
-| Type | Byte 1 Value | Direction | Purpose |
+| type | byte 1 value | direction | purpose |
 |------|--------------|-----------|---------|
-| Audio | 0x60 (96) | Client → Server | Audio RTP packets |
-| Timing Request | 0x52 | Server → Client | Time sync request |
-| Timing Response | 0xD3 | Client → Server | Time sync response |
-| Sync | 0xD4 | Client → Server | RTP-to-NTP mapping |
+| audio | 0x60 (96) | client → server | audio rtp packets |
+| timing request | 0x52 | server → client | time sync request |
+| timing response | 0xd3 | client → server | time sync response |
+| sync | 0xd4 | client → server | rtp-to-ntp mapping |
 
-### Port Summary
+### port summary
 
-| Port | Type | Use |
+| port | type | use |
 |------|------|-----|
-| 5000 | TCP | RTSP control |
-| 6001 | UDP | Control (sync packets) |
-| 6002 | UDP | Timing |
-| 6003 | UDP | Audio RTP |
+| 5000 | tcp | rtsp control |
+| 6001 | udp | control (sync packets) |
+| 6002 | udp | timing |
+| 6003 | udp | audio rtp |
 
-### Constants
+### constants
 
 ```kotlin
 const val SAMPLE_RATE = 44100
@@ -685,37 +647,25 @@ const val DEFAULT_LATENCY_SAMPLES = DEFAULT_LATENCY_MS * SAMPLE_RATE / 1000  // 
 const val NTP_EPOCH_OFFSET = 2208988800L  // Seconds between 1900 and 1970
 ```
 
-### mDNS Discovery
+### mdns discovery
 
-Service type: `_raop._tcp.local.`
-Name format: `<MAC_ADDRESS>@<Friendly Name>`
-
-Example: `D1BC033E2A49@debian`
-
-TXT Record Fields:
-| Field | Description |
-|-------|-------------|
-| `cn` | Codecs: 0=PCM, 1=ALAC, 2=AAC |
-| `et` | Encryption types supported |
-| `md` | Metadata types |
-| `tp` | Transport: UDP or TCP |
-| `vn` | Protocol version |
-| `vs` | Server version |
+service type: `_raop._tcp.local.`
+name format: `<mac_address>@<friendly name>`
+example: `d1bc033e2a49@debian`
 
 ---
 
-## References
+## references
 
-- [Unofficial AirPlay Protocol Specification](https://nto.github.io/AirPlay.html)
+- [unofficial airplay protocol specification](https://nto.github.io/AirPlay.html)
 - [shairport-sync source code](https://github.com/mikebrady/shairport-sync)
-- [RFC 3550 - RTP](https://datatracker.ietf.org/doc/html/rfc3550)
-- [RFC 3551 - RTP Audio/Video Profile](https://datatracker.ietf.org/doc/html/rfc3551)
-- [RFC 5905 - NTP](https://datatracker.ietf.org/doc/html/rfc5905)
+- [rfc 3550 - rtp](https://datatracker.ietf.org/doc/html/rfc3550)
+- [rfc 3551 - rtp audio/video profile](https://datatracker.ietf.org/doc/html/rfc3551)
+- [rfc 5905 - ntp](https://datatracker.ietf.org/doc/html/rfc5905)
 
 ---
 
-## Changelog
+## changelog
 
-- **January 2026**: Added comprehensive sync packet timing documentation, encryption details, troubleshooting guide
-- **December 2025**: Initial protocol overview
-
+- **january 2026**: added comprehensive sync packet timing documentation, encryption details, troubleshooting guide
+- **december 2025**: initial protocol overview
