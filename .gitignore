@@ -44,3 +44,27 @@ Thumbs.db
 # Docker (not needed for this project)
 docker-compose.yml
 Dockerfile
+
+# Python / Scripts
+__pycache__/
+*.pyc
+*.pyo
+venv/
+env/
+.env
+
+# Audio test files
+*.wav
+*.pcm
+scripts/*.wav
+
+# External Source Code (submodules/clones)
+*_src/
+alac_src/
+nqptp_src/
+pyatv_src/
+shairport-sync-src/
+
+# Agent/AI artifacts
+.agent/
+.gemini/
