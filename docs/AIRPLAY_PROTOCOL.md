@@ -1,25 +1,231 @@
-# AirPlay 1 (RAOP) Protocol Documentation
+# AirPlay Protocol Documentation
 
 > **Status**: Comprehensive reference based on reverse engineering and implementation
 > **Last Updated**: January 2026
 
-This document provides a complete reference for the AirPlay 1 protocol (also known as RAOP - Remote Audio Output Protocol), based on reverse engineering and implementation experience with shairport-sync receivers.
+This document provides a complete reference for the AirPlay protocol, covering both AirPlay 1 (RAOP) and AirPlay 2.
 
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Protocol Architecture](#protocol-architecture)
-3. [RTSP Control Protocol](#rtsp-control-protocol)
-4. [Session Establishment](#session-establishment)
-5. [Audio Streaming](#audio-streaming)
-6. [Time Synchronization](#time-synchronization)
-7. [Encryption](#encryption)
-8. [Troubleshooting](#troubleshooting)
-9. [Quick Reference](#quick-reference)
+2. [AirPlay 1 (RAOP)](#airplay-1-raop)
+3. [AirPlay 2](#airplay-2)
+4. [Protocol Architecture](#protocol-architecture)
+5. [RTSP Control Protocol](#rtsp-control-protocol)
+6. [Session Establishment](#session-establishment)
+7. [Audio Streaming](#audio-streaming)
+8. [Time Synchronization](#time-synchronization)
+9. [Encryption](#encryption)
+10. [Troubleshooting](#troubleshooting)
+11. [Quick Reference](#quick-reference)
 
 ---
 
-## Overview
+## AirPlay 2
+
+> **Status**: Work in Progress
+> **Protocol**: RTSP/1.0 on port 7000 (NOT HTTP!)
+
+### Key Discovery
+
+**IMPORTANT**: AirPlay 2 uses RTSP/1.0 protocol on port 7000, NOT HTTP/1.1!
+
+Shairport-sync and other AirPlay 2 receivers expect:
+```
+POST /pair-setup RTSP/1.0
+CSeq: 1
+Host: 192.168.1.220:7000
+Content-Type: application/octet-stream
+Content-Length: 6
+
+<TLV8 body>
+```
+
+NOT:
+```
+POST /pair-setup HTTP/1.1  ← WRONG! Returns 400
+```
+
+### Protocol Flow
+
+```
+Client                                    Server (AirPlay 2 Receiver)
+   |                                           |
+   |  ---- POST /info (RTSP/1.0) ------------> |
+   |  <-------- 200 OK + bplist --------------- |
+   |                                           |
+   |  ---- POST /pair-setup M1 --------------> |
+   |  <-------- 200 OK + M2 (Salt, B) -------- |
+   |                                           |
+   |  ---- POST /pair-setup M3 (A, proof) ---> |
+   |  <-------- 200 OK + M4 (proof) ---------- |
+   |                                           |
+   |  ---- POST /pair-setup M5 (encrypted) --> |
+   |  <-------- 200 OK + M6 (encrypted) ------ |
+   |                                           |
+   |  ---- POST /pair-verify ---------------- >|
+   |  <-------- 200 OK ----------------------- |
+   |                                           |
+   |  ---- POST /setup (streams) -----------> |
+   |  <-------- 200 OK + ports --------------- |
+   |                                           |
+   |  ==== Encrypted audio stream ===========> |
+```
+
+### Pair-Setup (SRP-6a + TLV8)
+
+AirPlay 2 uses HomeKit Accessory Protocol (HAP) style pairing:
+
+#### TLV8 Types
+| Type | Name | Description |
+|------|------|-------------|
+| 0x00 | METHOD | 0x00=Pair-Setup, 0x01=Pair-Setup-Auth, 0x02=Pair-Verify |
+| 0x01 | IDENTIFIER | Device identifier (username) |
+| 0x02 | SALT | SRP salt (16 bytes) |
+| 0x03 | PUBLIC_KEY | SRP public key (A or B, 384 bytes) |
+| 0x04 | PROOF | SRP proof (M1 or M2, 64 bytes) |
+| 0x05 | ENCRYPTED_DATA | Encrypted TLV8 payload |
+| 0x06 | STATE | Message state (M1=0x01, M2=0x02, etc.) |
+| 0x07 | ERROR | Error code |
+| 0x0A | SIGNATURE | Ed25519 signature |
+
+#### M1 (Client → Server)
+```
+TLV8:
+  06 01 01    # State = 0x01 (M1)
+  00 01 00    # Method = 0x00 (Pair-Setup)
+```
+
+#### M2 (Server → Client)
+```
+TLV8:
+  06 01 02            # State = 0x02 (M2)
+  02 10 <16 bytes>    # Salt (16 bytes)
+  03 FF <255 bytes>   # PublicKey B (chunk 1)
+  03 81 <129 bytes>   # PublicKey B (chunk 2) - total 384 bytes
+```
+
+#### M3 (Client → Server)
+```
+TLV8:
+  06 01 03            # State = 0x03 (M3)
+  03 FF <255 bytes>   # PublicKey A (chunk 1)
+  03 81 <129 bytes>   # PublicKey A (chunk 2) - total 384 bytes
+  04 40 <64 bytes>    # Proof M1 (SHA-512 hash, 64 bytes)
+```
+
+### SRP-6a Parameters (Apple's Convention)
+
+| Parameter | Value |
+|-----------|-------|
+| Group | **3072-bit** (RFC 5054) - Server returns 384-byte public keys |
+| Generator g | **5** (not 2!) |
+| Hash | SHA-512 |
+| Identity I | "Pair-Setup" |
+| Password P | PIN code (e.g., "3939" for transient) |
+
+**Critical findings from shairport-sync source:**
+
+1. **Apple uses g=5**, while standard SRP uses g=2
+2. **3072-bit group** - Server B is 384 bytes, use RFC 5054 3072-bit N constant
+3. **k and u use PADDED hashing**: `k = H(PAD(N) | PAD(g))`, `u = H(PAD(A) | PAD(B))`
+4. **x uses natural byte length**: `x = H(salt | H(I:P))` where salt is raw bytes from TLV
+5. **M1 proof uses NATURAL byte lengths**: 
+   - `M1 = H(H(N) XOR H(g) | H(I) | s | A | B | K)`
+   - `H(g)` uses natural length of g=5 (just 1 byte: `0x05`)
+   - `H(N)` uses natural length of N (384 bytes)
+   - s, A, B also use natural byte lengths (not padded)
+6. **K = H(S)** using natural byte length of shared secret S
+
+### SRP Calculation Summary
+
+```python
+# k = H(PAD(N) | PAD(g)) - PADDED
+k = sha512(pad_384(N) + pad_384(g))
+
+# u = H(PAD(A) | PAD(B)) - PADDED  
+u = sha512(pad_384(A) + pad_384(B))
+
+# x = H(salt | H(I:P)) - NATURAL
+inner = sha512(b"Pair-Setup" + b":" + b"3939")
+x = sha512(salt_bytes + inner)
+
+# S = (B - k * g^x) ^ (a + u*x) mod N
+# K = H(S) - NATURAL
+K = sha512(int_to_bytes_natural(S))
+
+# M1 = H(H(N) XOR H(g) | H(I) | s | A | B | K) - NATURAL lengths!
+H_N = sha512(int_to_bytes_natural(N))    # 384 bytes
+H_g = sha512(int_to_bytes_natural(g))    # 1 byte for g=5!
+H_xor = H_N ^ H_g
+H_I = sha512(b"Pair-Setup")
+M1 = sha512(H_xor + H_I + salt + int_to_bytes_natural(A) + int_to_bytes_natural(B) + K)
+```
+
+### Transient Pairing
+
+Transient pairing allows connection WITHOUT user PIN entry:
+
+1. **M1 must include TLV_FLAGS = 0x10** (PairingFlagsTransient)
+2. **PIN is hardcoded to "3939"** for SRP calculation
+3. Server accepts if `airplay_pin = NULL` in config (shairport-sync default)
+
+```
+M1 for Transient:
+  06 01 01    # State = M1
+  00 01 00    # Method = Pair-Setup
+  13 01 10    # Flags = 0x10 (Transient) ← IMPORTANT!
+```
+
+Without the FLAGS field, you get **RTSP 470 Connection Authorization Required**.
+
+### Crypto Primitives Required
+
+1. **SRP-6a**: For pair-setup authentication
+2. **Ed25519**: For signing during pair-setup M5
+3. **X25519**: For key exchange during pair-verify
+4. **ChaCha20-Poly1305**: For encrypted payloads
+5. **HKDF-SHA512**: For key derivation
+
+### Test Commands
+
+Using Python to test transient pair-setup:
+```python
+# M1 Request with Transient Flag (RTSP!)
+POST /pair-setup RTSP/1.0
+CSeq: 1
+Content-Type: application/octet-stream
+Content-Length: 8
+
+\x06\x01\x01\x00\x01\x00\x13\x01\x10   # State=M1, Method=PairSetup, Flags=Transient
+
+# Expected M2 Response:
+RTSP/1.0 200 OK
+Content-Type: application/octet-stream
+Content-Length: 409
+
+# TLV8 with State=0x02, Salt (16 bytes), PublicKey B (384 bytes)
+```
+
+### Dependencies (shairport-sync AirPlay 2)
+
+To run shairport-sync in AirPlay 2 mode:
+```bash
+# Build shairport-sync with AirPlay 2 support
+./configure --with-airplay-2 --with-ssl=openssl --with-avahi --with-pa
+
+# NQPTP daemon required (PTP timing)
+sudo nqptp &
+
+# Run shairport-sync
+shairport-sync --name="debian" -vvvv -o pa
+```
+
+---
+
+## AirPlay 1 (RAOP)
+
+### Overview
 
 AirPlay 1 is Apple's proprietary audio streaming protocol, introduced circa 2004 as "AirTunes" and later renamed to AirPlay. It enables wireless audio streaming from a sender (client) to a receiver (speaker/server).
 
