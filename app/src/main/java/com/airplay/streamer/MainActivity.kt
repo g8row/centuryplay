@@ -24,6 +24,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import com.airplay.streamer.databinding.ActivityMainBinding
 import com.airplay.streamer.discovery.AirPlayDevice
 import com.airplay.streamer.service.AudioCaptureService
+import com.airplay.streamer.service.MediaInfoTracker
 import com.airplay.streamer.ui.MainViewModel
 import com.airplay.streamer.ui.SpeakerAdapter
 import com.airplay.streamer.util.LogServer
@@ -35,6 +36,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private val viewModel: MainViewModel by viewModels()
     private lateinit var speakerAdapter: SpeakerAdapter
+    private lateinit var mediaInfoTracker: MediaInfoTracker
 
     private var pendingDevice: AirPlayDevice? = null
 
@@ -84,6 +86,11 @@ class MainActivity : AppCompatActivity() {
         setupRecyclerView()
         setupControls()
         observeState()
+        
+        // Initialize media info tracker
+        mediaInfoTracker = MediaInfoTracker(this)
+        mediaInfoTracker.start()
+        observeMediaInfo()
 
         // Register for service state changes
         AudioCaptureService.instance?.onStateChanged = { isStreaming ->
@@ -250,6 +257,47 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun observeMediaInfo() {
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                mediaInfoTracker.mediaInfo.collect { info ->
+                    updateNowPlayingUI(info)
+                }
+            }
+        }
+    }
+
+    private fun updateNowPlayingUI(info: MediaInfoTracker.MediaInfo) {
+        if (info.hasContent && viewModel.uiState.value.isStreaming) {
+            binding.nowPlayingLayout.visibility = View.VISIBLE
+            binding.nowPlayingTitle.text = info.title ?: "Unknown"
+            binding.nowPlayingArtist.text = buildString {
+                info.artist?.let { append(it) }
+                if (info.artist != null && info.album != null) append(" • ")
+                info.album?.let { append(it) }
+            }.ifEmpty { "Unknown artist" }
+            
+            // Update album art
+            if (info.albumArt != null) {
+                binding.albumArt.setImageBitmap(info.albumArt)
+                binding.albumArt.imageTintList = null
+            } else {
+                binding.albumArt.setImageResource(R.drawable.ic_music_note)
+                binding.albumArt.imageTintList = 
+                    android.content.res.ColorStateList.valueOf(
+                        com.google.android.material.color.MaterialColors.getColor(
+                            binding.albumArt, com.google.android.material.R.attr.colorOnSurfaceVariant
+                        )
+                    )
+            }
+            
+            // Enable marquee scrolling for long titles
+            binding.nowPlayingTitle.isSelected = true
+        } else {
+            binding.nowPlayingLayout.visibility = View.GONE
+        }
+    }
+
     private fun updateConnectedSpeakerUI(device: AirPlayDevice?) {
         if (device != null) {
             binding.connectedSpeakerLayout.visibility = View.VISIBLE
@@ -310,11 +358,17 @@ class MainActivity : AppCompatActivity() {
             // Hide volume layout
             binding.volumeLayout.visibility = View.GONE
             
+            // Hide now playing when not streaming
+            binding.nowPlayingLayout.visibility = View.GONE
+            
             binding.streamingStatusText.visibility = View.GONE
             binding.connectionIndicator.animate().cancel()
             binding.connectionIndicator.scaleX = 1f
             binding.connectionIndicator.scaleY = 1f
         }
+        
+        // Update now playing visibility based on streaming state
+        updateNowPlayingUI(mediaInfoTracker.mediaInfo.value)
     }
 
     private fun checkPermissionsAndStart(device: AirPlayDevice) {
@@ -377,5 +431,6 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         AudioCaptureService.instance?.onStateChanged = null
+        mediaInfoTracker.stop()
     }
 }

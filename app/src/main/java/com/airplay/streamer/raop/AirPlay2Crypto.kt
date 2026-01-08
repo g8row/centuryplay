@@ -3,6 +3,8 @@ package com.airplay.streamer.raop
 import org.bouncycastle.crypto.agreement.X25519Agreement
 import org.bouncycastle.crypto.generators.Ed25519KeyPairGenerator
 import org.bouncycastle.crypto.generators.X25519KeyPairGenerator
+import org.bouncycastle.crypto.modes.ChaCha20Poly1305
+import org.bouncycastle.crypto.params.AEADParameters
 import org.bouncycastle.crypto.params.Ed25519KeyGenerationParameters
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
 import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
@@ -10,10 +12,7 @@ import org.bouncycastle.crypto.params.X25519KeyGenerationParameters
 import org.bouncycastle.crypto.params.X25519PrivateKeyParameters
 import org.bouncycastle.crypto.params.X25519PublicKeyParameters
 import org.bouncycastle.crypto.signers.Ed25519Signer
-import org.bouncycastle.crypto.engines.ChaCha7539Engine
-import org.bouncycastle.crypto.macs.Poly1305
 import org.bouncycastle.crypto.params.KeyParameter
-import org.bouncycastle.crypto.params.ParametersWithIV
 import java.security.MessageDigest
 import java.security.SecureRandom
 import javax.crypto.Mac
@@ -145,6 +144,14 @@ object AirPlay2Crypto {
         val prk = hkdfExtract(salt, ikm)
         return hkdfExpand(prk, info, length)
     }
+    
+    /**
+     * HKDF with string salt and info (convenience for Control-Salt, etc.)
+     * Matches Python: hkdf_expand(salt_str, info_str, shared_secret) -> 32 bytes
+     */
+    fun hkdfExpand(salt: String, info: String, sharedSecret: ByteArray): ByteArray {
+        return hkdf(salt.toByteArray(Charsets.UTF_8), sharedSecret, info.toByteArray(Charsets.UTF_8), 32)
+    }
 
     // ==================== ChaCha20-Poly1305 ====================
 
@@ -159,48 +166,16 @@ object AirPlay2Crypto {
         val nonce = ByteArray(12)
         random.nextBytes(nonce)
         
-        // ChaCha20 encryption
-        val chacha = ChaCha7539Engine()
-        chacha.init(true, ParametersWithIV(KeyParameter(key), nonce))
+        val cipher = ChaCha20Poly1305()
+        val params = AEADParameters(KeyParameter(key), 128, nonce, aad)
+        cipher.init(true, params)
         
-        val ciphertext = ByteArray(plaintext.size)
-        chacha.processBytes(plaintext, 0, plaintext.size, ciphertext, 0)
-        
-        // Poly1305 MAC
-        val poly1305Key = ByteArray(32)
-        val zeros = ByteArray(32)
-        val polyEngine = ChaCha7539Engine()
-        polyEngine.init(true, ParametersWithIV(KeyParameter(key), nonce))
-        polyEngine.processBytes(zeros, 0, 32, poly1305Key, 0)
-        
-        val poly = Poly1305()
-        poly.init(KeyParameter(poly1305Key))
-        
-        // AAD with padding
-        poly.update(aad, 0, aad.size)
-        if (aad.size % 16 != 0) {
-            val padding = ByteArray(16 - (aad.size % 16))
-            poly.update(padding, 0, padding.size)
-        }
-        
-        // Ciphertext with padding
-        poly.update(ciphertext, 0, ciphertext.size)
-        if (ciphertext.size % 16 != 0) {
-            val padding = ByteArray(16 - (ciphertext.size % 16))
-            poly.update(padding, 0, padding.size)
-        }
-        
-        // Lengths (little-endian)
-        val lengths = ByteArray(16)
-        putLittleEndianLong(lengths, 0, aad.size.toLong())
-        putLittleEndianLong(lengths, 8, ciphertext.size.toLong())
-        poly.update(lengths, 0, 16)
-        
-        val tag = ByteArray(16)
-        poly.doFinal(tag, 0)
+        val output = ByteArray(cipher.getOutputSize(plaintext.size))
+        var len = cipher.processBytes(plaintext, 0, plaintext.size, output, 0)
+        len += cipher.doFinal(output, len)
         
         // Return: nonce + ciphertext + tag
-        return nonce + ciphertext + tag
+        return nonce + output.copyOf(len)
     }
 
     /**
@@ -212,56 +187,63 @@ object AirPlay2Crypto {
         require(encrypted.size >= 28) { "Encrypted data too short" }
         
         val nonce = encrypted.copyOfRange(0, 12)
-        val tag = encrypted.copyOfRange(encrypted.size - 16, encrypted.size)
-        val ciphertext = encrypted.copyOfRange(12, encrypted.size - 16)
+        val ciphertextWithTag = encrypted.copyOfRange(12, encrypted.size)
         
-        // Verify Poly1305 MAC
-        val poly1305Key = ByteArray(32)
-        val zeros = ByteArray(32)
-        val polyEngine = ChaCha7539Engine()
-        polyEngine.init(true, ParametersWithIV(KeyParameter(key), nonce))
-        polyEngine.processBytes(zeros, 0, 32, poly1305Key, 0)
-        
-        val poly = Poly1305()
-        poly.init(KeyParameter(poly1305Key))
-        
-        poly.update(aad, 0, aad.size)
-        if (aad.size % 16 != 0) {
-            val padding = ByteArray(16 - (aad.size % 16))
-            poly.update(padding, 0, padding.size)
+        return try {
+            val cipher = ChaCha20Poly1305()
+            val params = AEADParameters(KeyParameter(key), 128, nonce, aad)
+            cipher.init(false, params)
+            
+            val output = ByteArray(cipher.getOutputSize(ciphertextWithTag.size))
+            var len = cipher.processBytes(ciphertextWithTag, 0, ciphertextWithTag.size, output, 0)
+            len += cipher.doFinal(output, len)
+            
+            output.copyOf(len)
+        } catch (e: Exception) {
+            null // Authentication failed
         }
-        
-        poly.update(ciphertext, 0, ciphertext.size)
-        if (ciphertext.size % 16 != 0) {
-            val padding = ByteArray(16 - (ciphertext.size % 16))
-            poly.update(padding, 0, padding.size)
-        }
-        
-        val lengths = ByteArray(16)
-        putLittleEndianLong(lengths, 0, aad.size.toLong())
-        putLittleEndianLong(lengths, 8, ciphertext.size.toLong())
-        poly.update(lengths, 0, 16)
-        
-        val expectedTag = ByteArray(16)
-        poly.doFinal(expectedTag, 0)
-        
-        if (!expectedTag.contentEquals(tag)) {
-            return null // Authentication failed
-        }
-        
-        // Decrypt with ChaCha20
-        val chacha = ChaCha7539Engine()
-        chacha.init(false, ParametersWithIV(KeyParameter(key), nonce))
-        
-        val plaintext = ByteArray(ciphertext.size)
-        chacha.processBytes(ciphertext, 0, ciphertext.size, plaintext, 0)
-        
-        return plaintext
     }
 
-    private fun putLittleEndianLong(bytes: ByteArray, offset: Int, value: Long) {
-        for (i in 0..7) {
-            bytes[offset + i] = (value shr (8 * i)).toByte()
+    /**
+     * Encrypt with ChaCha20-Poly1305 using a specific nonce
+     * Returns: ciphertext + tag (16 bytes) - no nonce prepended
+     */
+    fun chaCha20Poly1305EncryptWithNonce(key: ByteArray, nonce: ByteArray, plaintext: ByteArray, aad: ByteArray = ByteArray(0)): ByteArray {
+        require(key.size == 32) { "Key must be 32 bytes" }
+        require(nonce.size == 12) { "Nonce must be 12 bytes" }
+        
+        val cipher = ChaCha20Poly1305()
+        val params = AEADParameters(KeyParameter(key), 128, nonce, aad)
+        cipher.init(true, params)
+        
+        val output = ByteArray(cipher.getOutputSize(plaintext.size))
+        var len = cipher.processBytes(plaintext, 0, plaintext.size, output, 0)
+        len += cipher.doFinal(output, len)
+        
+        return output.copyOf(len)
+    }
+
+    /**
+     * Decrypt with ChaCha20-Poly1305 using a specific nonce
+     * Input: ciphertext + tag (16 bytes) - no nonce prepended
+     */
+    fun chaCha20Poly1305DecryptWithNonce(key: ByteArray, nonce: ByteArray, encrypted: ByteArray, aad: ByteArray = ByteArray(0)): ByteArray? {
+        require(key.size == 32) { "Key must be 32 bytes" }
+        require(nonce.size == 12) { "Nonce must be 12 bytes" }
+        require(encrypted.size >= 16) { "Encrypted data too short" }
+        
+        return try {
+            val cipher = ChaCha20Poly1305()
+            val params = AEADParameters(KeyParameter(key), 128, nonce, aad)
+            cipher.init(false, params)
+            
+            val output = ByteArray(cipher.getOutputSize(encrypted.size))
+            var len = cipher.processBytes(encrypted, 0, encrypted.size, output, 0)
+            len += cipher.doFinal(output, len)
+            
+            output.copyOf(len)
+        } catch (e: Exception) {
+            null // Authentication failed
         }
     }
 

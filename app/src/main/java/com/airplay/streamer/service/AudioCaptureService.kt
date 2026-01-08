@@ -20,6 +20,7 @@ import androidx.core.app.NotificationCompat
 import com.airplay.streamer.MainActivity
 import com.airplay.streamer.R
 import com.airplay.streamer.raop.RaopClient
+import com.airplay.streamer.airplay2.AirPlay2Client
 import com.airplay.streamer.util.LogServer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -65,7 +66,7 @@ class AudioCaptureService : Service() {
     private var mediaProjection: MediaProjection? = null
     private var audioRecord: AudioRecord? = null
     private var raopClient: RaopClient? = null
-    private var airPlay2Client: com.airplay.streamer.raop.AirPlay2Client? = null
+    private var airPlay2Client: AirPlay2Client? = null
     private var captureJob: Job? = null
 
     private var isCapturing = false
@@ -143,38 +144,44 @@ class AudioCaptureService : Service() {
 
                 if (useV2) {
                     // AirPlay 2 Path
-                    LogServer.log("Starting AirPlay 2 connection to $host:$port")
-                    val device = com.airplay.streamer.discovery.AirPlayDevice(
-                        deviceName, host, port, "deviceid", null, emptyMap()
-                    )
-                    
-                    val client = com.airplay.streamer.raop.AirPlay2Client(device)
-                    airPlay2Client = client
-                    
-                    client.connect()
-                    LogServer.log("Connected. Attempting Pair-Setup...")
-                    
-                    try {
-                        client.pair("0000") // Default PIN - TODO: make configurable
+                LogServer.log("Starting AirPlay 2 connection to $host:$port")
+                // Note: AirPlay2Client only needs host/port, not full device object for now
+                val client = AirPlay2Client(host, port)
+                airPlay2Client = client
+                
+                client.connect()
+                LogServer.log("Connected. Attempting Pair-Setup (transient)...")
+                
+                try {
+                    // Use transient pairing (no PIN entry needed, uses "3939" internally)
+                    if (client.pair()) {
                         LogServer.log("AirPlay 2 Pair-Setup Successful!")
                         
                         // Try to set up audio stream
                         LogServer.log("Setting up audio stream...")
-                        val serverPort = client.setupAudioStream()
-                        LogServer.log("Audio stream ready on server port $serverPort")
-                        
-                        // Start audio capture for v2
-                        val captureStarted = tryAudioPlaybackCapture()
-                        if (captureStarted) {
-                            isCapturing = true
-                            onStateChanged?.invoke(true)
-                            LogServer.log("Audio capture started for AirPlay 2")
-                            startAirPlay2StreamLoop(client)
+                        if (client.setupStreaming()) {
+                            LogServer.log("Audio stream setup complete")
+                            
+                            // Start audio capture for v2
+                            val captureStarted = tryAudioPlaybackCapture()
+                            if (captureStarted) {
+                                isCapturing = true
+                                onStateChanged?.invoke(true)
+                                LogServer.log("Audio capture started for AirPlay 2")
+                                startAirPlay2StreamLoop(client)
+                            } else {
+                                LogServer.log("Audio capture failed for AirPlay 2")
+                                stopCapture()
+                            }
                         } else {
-                            LogServer.log("Audio capture failed for AirPlay 2")
+                            LogServer.log("AirPlay 2 audio setup failed")
                             stopCapture()
                         }
-                    } catch (e: Exception) {
+                    } else {
+                        LogServer.log("AirPlay 2 pairing failed")
+                        stopCapture()
+                    }
+                } catch (e: Exception) {
                         LogServer.log("AirPlay 2 error: ${e.message}")
                         // Pairing or stream setup failed, but connection is ok
                         onStateChanged?.invoke(false)
@@ -293,7 +300,7 @@ class AudioCaptureService : Service() {
         }
     }
 
-    private fun startAirPlay2StreamLoop(client: com.airplay.streamer.raop.AirPlay2Client) {
+    private fun startAirPlay2StreamLoop(client: AirPlay2Client) {
         captureJob = serviceScope.launch(Dispatchers.IO) {
             val buffer = ByteArray(BUFFER_SIZE)
             var packetCount = 0L
@@ -302,10 +309,9 @@ class AudioCaptureService : Service() {
                 val bytesRead = audioRecord?.read(buffer, 0, BUFFER_SIZE) ?: -1
 
                 if (bytesRead > 0) {
-                    // For AirPlay 2, we'd need to format as buffered audio packets
-                    // For now, just send raw data (will need RTP wrapping for real implementation)
-                    client.streamAudio(buffer.copyOf(bytesRead))
-                    packetCount++
+                    // Send raw PCM data to client which handles ALAC encoding and RTP
+                client.sendAudioData(buffer.copyOf(bytesRead))
+                packetCount++
                     
                     // Log progress periodically
                     if (packetCount % 1000 == 0L) {
