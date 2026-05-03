@@ -77,9 +77,11 @@ class AirPlayDiscovery(
         }
 
         // Create jmDNS instance
+        val jmdnsStartTime = System.currentTimeMillis()
         jmDNS = withContext(Dispatchers.IO) {
             JmDNS.create(localAddress, "AirPlayDiscovery")
         }
+        android.util.Log.d("PROFILING", "JmDNS.create finished in ${System.currentTimeMillis() - jmdnsStartTime}ms")
 
         // Listener for AirPlay 2 services (_airplay._tcp)
         val airplay2Listener = object : ServiceListener {
@@ -135,8 +137,12 @@ class AirPlayDiscovery(
                 if (device != null) {
                     val existingDevice = discoveredDevices[device.host]
                     if (existingDevice != null) {
-                        // Update existing AirPlay 2 device with RAOP port
-                        val mergedDevice = existingDevice.copy(raopPort = device.port)
+                        // Merge: keep AirPlay 2 identity but use RAOP port and RAOP TXT features
+                        // (RAOP TXT record contains et=, cn= etc. needed for AirPlay 1 connection)
+                        val mergedDevice = existingDevice.copy(
+                            raopPort = device.port,
+                            features = device.features
+                        )
                         discoveredDevices[device.host] = mergedDevice
                         trySend(DiscoveryEvent.DeviceFound(mergedDevice))
                     } else {
@@ -171,10 +177,22 @@ class AirPlayDiscovery(
 
     private fun parseServiceEvent(event: ServiceEvent, isRaop: Boolean): AirPlayDevice? {
         val info = event.info ?: return null
-        val addresses = info.inet4Addresses
-        if (addresses.isEmpty()) return null
 
-        val host = addresses[0].hostAddress ?: return null
+        // inet4Addresses can be empty for devices with UUID hostnames (e.g. AirScreen).
+        // Fall back to resolving the server hostname. Always use IPv4 — IPv6 link-local
+        // addresses cause port 7000 (AirPlay 2) to be selected and RTSP connections to fail.
+        val host: String = info.inet4Addresses.firstOrNull()?.hostAddress
+            ?: runCatching {
+                val server = info.server?.trimEnd('.')
+                if (server.isNullOrEmpty()) null
+                else InetAddress.getAllByName(server)
+                    ?.filterIsInstance<java.net.Inet4Address>()
+                    ?.firstOrNull()?.hostAddress
+            }.getOrNull()
+            ?: run {
+                Log.w(TAG, "Could not resolve IPv4 address for ${event.name} (server=${info.server})")
+                return null
+            }
         val port = info.port
         val name = event.name
 

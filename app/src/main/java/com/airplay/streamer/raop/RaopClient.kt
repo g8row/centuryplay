@@ -29,7 +29,8 @@ import kotlin.random.Random
  */
 class RaopClient(
     private val host: String,
-    private val port: Int
+    private val port: Int,
+    deviceFeatures: Map<String, String> = emptyMap()
 ) {
     companion object {
         private const val TAG = "RaopClient"
@@ -66,6 +67,7 @@ class RaopClient(
     private var sessionId: String? = null
     private var serverSessionId: String? = null
     private val localSessionId: String = Random.nextLong(0, Long.MAX_VALUE).toString()
+    private var localIp: String = "0.0.0.0"
     private var serverPort: Int = 0
     private var serverControlPort: Int = 0  // Server's control port for sync packets
     private var serverTimingPort: Int = 0   // Server's timing port
@@ -109,29 +111,38 @@ class RaopClient(
     suspend fun connect(): Boolean = withContext(Dispatchers.IO) {
         try {
             logD("Connecting to $host:$port")
-            
-            // Create RTSP socket with short timeout for diagnostics
-            rtspSocket = Socket(host, port).apply {
-                soTimeout = 3000  // 3 second timeout for faster feedback
-            }
-            logD("RTSP socket connected")
-            
-            rtspReader = BufferedReader(InputStreamReader(rtspSocket!!.getInputStream()))
-            rtspWriter = PrintWriter(OutputStreamWriter(rtspSocket!!.getOutputStream()), true)
+
+            // Connection 1: fp-setup × 2 + OPTIONS, then close — matches Apple Music's behaviour.
+            rtspSocket = Socket(host, port).apply { soTimeout = 5000 }
+            localIp = rtspSocket!!.localAddress.hostAddress ?: "0.0.0.0"
+            logD("RTSP socket connected, localIp=$localIp")
+            rtspReader = BufferedReader(InputStreamReader(rtspSocket!!.getInputStream(), Charsets.ISO_8859_1))
+            rtspWriter = PrintWriter(OutputStreamWriter(rtspSocket!!.getOutputStream(), Charsets.ISO_8859_1), true)
+
+            logD("Connection 1: fp-setup...")
+            doFpSetup()
+
+            logD("Testing OPTIONS...")
+            val optionsResult = testOptions()
+            logD("OPTIONS result: $optionsResult")
+
+            rtspSocket?.close()
+            cSeq.set(0)
+
+            // Connection 2: fp-setup × 2 + ANNOUNCE → SETUP → RECORD
+            rtspSocket = Socket(host, port).apply { soTimeout = 10000 }
+            rtspReader = BufferedReader(InputStreamReader(rtspSocket!!.getInputStream(), Charsets.ISO_8859_1))
+            rtspWriter = PrintWriter(OutputStreamWriter(rtspSocket!!.getOutputStream(), Charsets.ISO_8859_1), true)
+            logD("Reopened RTSP socket for ANNOUNCE")
+
+            logD("Connection 2: fp-setup...")
+            doFpSetup()
 
             // Create UDP sockets for audio/control/timing
             audioSocket = DatagramSocket()
             controlSocket = DatagramSocket()
             timingSocket = DatagramSocket()
             logD("UDP sockets: audio=${audioSocket?.localPort}, ctrl=${controlSocket?.localPort}, time=${timingSocket?.localPort}")
-
-            // Diagnostic: Try OPTIONS first to see if server responds at all
-            logD("Testing OPTIONS...")
-            val optionsResult = testOptions()
-            logD("OPTIONS result: $optionsResult")
-            
-            // Now try ANNOUNCE with longer timeout
-            rtspSocket?.soTimeout = 10000
             logD("Starting ANNOUNCE...")
             if (!announce()) {
                 logE("ANNOUNCE failed")
@@ -164,6 +175,82 @@ class RaopClient(
             callback?.onError("Connection failed: ${e.message}")
             disconnect()
             false
+        }
+    }
+
+    /**
+     * FairPlay SAPv2 stub handshake (POST /fp-setup × 2).
+     * AirScreen requires this exchange before it accepts ANNOUNCE.
+     * Phase 1: send 16-byte FPLY challenge; server returns hardcoded 142-byte blob.
+     * Phase 2: send 164-byte FPLY message; server echoes 32 bytes back.
+     * We don't use the server's response for crypto — we just need the exchange to happen.
+     * After this, we send unencrypted L16 so no fpaeskey is needed.
+     */
+    private fun doFpSetup() {
+        try {
+            // Phase 1 — 16-byte FPLY v3 message, mode=0 at offset 14
+            val phase1 = byteArrayOf(
+                0x46, 0x50, 0x4c, 0x59,  // FPLY magic
+                0x03, 0x01, 0x01, 0x00,  // version=3, type=1(setup), seq=1
+                0x00, 0x00, 0x00, 0x04,  // length field
+                0x00, 0x00, 0x00, 0x00   // [14]=mode=0
+            )
+            sendFpSetupRequest(phase1, includeClientHeaders = false)
+            val resp1 = parseRtspResponse()
+            logD("fp-setup phase1 response: ${resp1?.first}")
+            val len1 = resp1?.second?.get("Content-Length")?.toIntOrNull() ?: 0
+            discardResponseBody(len1)
+
+            // Phase 2 — 164-byte FPLY v3 message; receiver checks [4]==3 and echoes [144..163]
+            val phase2 = ByteArray(164).also { b ->
+                b[0] = 0x46; b[1] = 0x50; b[2] = 0x4c; b[3] = 0x59  // FPLY
+                b[4] = 0x03  // version 3
+                b[5] = 0x01  // type = setup
+                b[6] = 0x03  // seq = 3 (SETUP2_MESSAGE_SEQ)
+                // bytes 7–163 left as zeros — receiver only echoes [144..163], ignores the rest
+            }
+            sendFpSetupRequest(phase2, includeClientHeaders = true)
+            val resp2 = parseRtspResponse()
+            logD("fp-setup phase2 response: ${resp2?.first}")
+            val len2 = resp2?.second?.get("Content-Length")?.toIntOrNull() ?: 0
+            discardResponseBody(len2)
+        } catch (e: Exception) {
+            logD("fp-setup skipped: ${e.message}")
+            // Non-fatal — devices like shairport-sync don't support fp-setup and that's fine
+        }
+    }
+
+    private fun sendFpSetupRequest(body: ByteArray, includeClientHeaders: Boolean) {
+        val sb = StringBuilder()
+        sb.append("POST /fp-setup RTSP/1.0\r\n")
+        sb.append("CSeq: ${cSeq.incrementAndGet()}\r\n")
+        sb.append("Content-Type: application/octet-stream\r\n")
+        sb.append("Content-Length: ${body.size}\r\n")
+        if (includeClientHeaders) {
+            sb.append("User-Agent: $USER_AGENT\r\n")
+            sb.append("Client-Instance: $clientInstance\r\n")
+            sb.append("DACP-ID: $dacpId\r\n")
+            sb.append("Active-Remote: $activeRemote\r\n")
+        }
+        sb.append("\r\n")
+        // Write text headers, then raw binary body
+        rtspWriter?.print(sb.toString())
+        rtspWriter?.flush()
+        rtspSocket?.getOutputStream()?.write(body)
+        rtspSocket?.getOutputStream()?.flush()
+    }
+
+    /** Read and discard [length] bytes from the RTSP response body via the buffered reader. */
+    private fun discardResponseBody(length: Int) {
+        if (length <= 0) return
+        val buf = CharArray(length)
+        var remaining = length
+        var offset = 0
+        while (remaining > 0) {
+            val n = rtspReader?.read(buf, offset, remaining) ?: break
+            if (n < 0) break
+            offset += n
+            remaining -= n
         }
     }
 
@@ -216,15 +303,11 @@ class RaopClient(
 
         logD("SDP content:\n$sdp")
 
-        // Generate Apple-Challenge for authentication
-        val challenge = generateAppleChallenge()
-        
         val request = buildRtspRequest(
             "ANNOUNCE",
             mapOf(
                 "Content-Type" to "application/sdp",
-                "Content-Length" to sdp.toByteArray().size.toString(),
-                "Apple-Challenge" to challenge
+                "Content-Length" to sdp.toByteArray().size.toString()
             ),
             sdp
         )
@@ -768,15 +851,13 @@ class RaopClient(
                         LogServer.log("SND: Pkt $rtpSequence, RMS=$rms (Max 32767), Vol=${Math.round(20 * Math.log10(rms.toDouble()))}dB")
                     }
 
-                    // Convert PCM from little-endian to big-endian (network byte order)
-                    // L16 format (RFC 3551) requires big-endian (network byte order)
+                    // L16 requires big-endian (network byte order)
                     val beData = swapEndianness(chunk)
-                    
-                    // Encrypt audio data with AES-128-CBC (only if encryption is enabled)
+
                     val payloadData = if (useEncryption) {
                         encryptAudio(beData)
                     } else {
-                        beData  // Send unencrypted for testing
+                        beData
                     }
                     
                     // Build RTP packet with payload
@@ -939,8 +1020,8 @@ class RaopClient(
         sessionId: String? = null
     ): String {
         val sb = StringBuilder()
-        // URL format per AirPlay spec: rtsp://host/sessionId (no port in URL)
-        sb.append("$method rtsp://$host/$localSessionId RTSP/1.0\r\n")
+        // AirPlay uses the client's own IP in the RTSP URL (not the server's)
+        sb.append("$method rtsp://$localIp/$localSessionId RTSP/1.0\r\n")
         sb.append("CSeq: ${cSeq.incrementAndGet()}\r\n")
         sb.append("User-Agent: $USER_AGENT\r\n")
         sb.append("Client-Instance: $clientInstance\r\n")
@@ -1002,9 +1083,12 @@ class RaopClient(
         }
     }
 
-    // Encryption is required for proper AirPlay compatibility
-    // When true, audio is encrypted with AES-128-CBC and keys are exchanged via RSA
-    private var useEncryption = true
+    // Use RSA encryption only if the receiver advertises et=1 in its TXT record.
+    // Devices like AirScreen advertise et=0,3,5 (no RSA), so we fall back to unencrypted.
+    private val supportedEncryptionTypes: Set<Int> = deviceFeatures["et"]
+        ?.split(",")?.mapNotNull { it.trim().toIntOrNull() }?.toSet()
+        ?: setOf(0, 1) // default: assume RSA supported if unknown
+    private var useEncryption = 1 in supportedEncryptionTypes
     
     private fun buildSdp(localIp: String, rsaAesKey: String, aesIv: String): String {
         val baseSdp = """
@@ -1015,8 +1099,7 @@ c=IN IP4 $host
 t=0 0
 m=audio 0 RTP/AVP 96
 a=rtpmap:96 L16/44100/2"""
-        
-        // Only include encryption parameters if encryption is enabled
+
         return if (useEncryption) {
             """
 $baseSdp
@@ -1024,7 +1107,7 @@ a=rsaaeskey:$rsaAesKey
 a=aesiv:$aesIv
 """.trimIndent().replace("\n", "\r\n")
         } else {
-            logD("ENCRYPTION DISABLED - streaming unencrypted L16 audio")
+            logD("No RSA support on receiver — streaming unencrypted L16")
             baseSdp.trimIndent().replace("\n", "\r\n")
         }
     }

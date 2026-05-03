@@ -30,4 +30,10 @@
     <string name="manual_connect_hint">ip:port (e.g. 192.168.1.100:5000)</string>
     <string name="manual_connect_description">connect to a device not discovered via mdns</string>
     <string name="save_manual_device">save device</string>
+    
+    <!-- Quick Settings Tile -->
+    <string name="tile_label">centuryplay</string>
+    <string name="tile_connected">streaming to %s</string>
+    <string name="tile_disconnected">tap to stream</string>
+    <string name="select_speaker">select speaker</string>
 </resources>
