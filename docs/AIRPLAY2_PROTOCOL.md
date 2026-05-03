@@ -22,6 +22,8 @@ this document covers the airplay 2 protocol, focusing on the technical requireme
 
 airplay 2 (ap2) is a major evolution of apple's wireless streaming protocol. it introduces multi-room audio, enhanced buffering, and modern security (hap). unlike airplay 1 (raop), which is relatively simple and unencrypted by default, airplay 2 is encrypted from the start and requires tight clock synchronization between all devices in a group.
 
+Important capture note: a receiver advertising `_airplay._tcp` does not mean macOS Music will necessarily use the AirPlay 2 audio path. Samsung AirScreen advertises `_airplay._tcp` on a dynamic port, but the macOS Music capture used RAOP TCP 5000 with FairPlay SAPv2 (`POST /fp-setup`) and then AppleLossless in the classic RAOP session.
+
 ---
 
 ## protocol differences
@@ -95,7 +97,7 @@ airplay 2 supports higher quality and more efficient codecs than airplay 1.
 | **aac** | 256kbps | lossy / bandwidth efficient |
 | **pcm (l16)** | 16/44.1 | raw audio before encapsulation |
 
-**note:** apple music on android often defaults to aak (256kbps) for third-party speakers, even if the source is lossless.
+**note:** apple music on android often defaults to aac (256kbps) for third-party speakers, even if the source is lossless.
 
 ---
 
@@ -137,6 +139,7 @@ a small native binary compiled via ndk that:
 1. **shizuku dependency:** requires the user to have shizuku installed and configured (via adb).
 2. **jitter:** without hardware timestamping (which android doesn't expose to apps), ptp accuracy is limited to software-level precision (~1-5ms), which is enough for stable playback but might struggle with "perfect" multi-room phase alignment.
 3. **battery:** running a high-frequency ptp clock and real-time audio capture is power-intensive.
+4. **hybrid receivers:** devices may advertise AirPlay 2 discovery while still accepting Music audio over RAOP plus FairPlay SAPv2. For centuryplay, treat `_raop._tcp` TXT `et=5` without `et=1` as a FairPlay sender problem, not as proof that the AirPlay 2/HAP path was selected.
 
 ---
 

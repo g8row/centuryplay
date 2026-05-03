@@ -19,6 +19,7 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.airplay.streamer.MainActivity
 import com.airplay.streamer.R
+import com.airplay.streamer.raop.RaopCapabilities
 import com.airplay.streamer.raop.RaopClient
 import com.airplay.streamer.util.LogServer
 import kotlinx.coroutines.CoroutineScope
@@ -138,6 +139,14 @@ class AudioCaptureService : Service() {
                         val parts = pair.split("=", limit = 2)
                         if (parts.size == 2) parts[0] to parts[1] else null
                     }.toMap()
+
+                if (RaopCapabilities.requiresUnsupportedFairPlay(deviceFeatures)) {
+                    LogServer.log(getString(R.string.fairplay_required_message, deviceName))
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                    return@launch
+                }
+
                 raopClient = RaopClient(host, port, deviceFeatures)
                 
                 // Set callback to handle server disconnects

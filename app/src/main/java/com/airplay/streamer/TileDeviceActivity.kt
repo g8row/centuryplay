@@ -18,6 +18,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.airplay.streamer.databinding.ActivityTileDeviceBinding
 import com.airplay.streamer.discovery.AirPlayDevice
+import com.airplay.streamer.raop.RaopCapabilities
 import com.airplay.streamer.service.AudioCaptureService
 import com.airplay.streamer.ui.MainViewModel
 import com.airplay.streamer.ui.SpeakerAdapter
@@ -106,6 +107,16 @@ class TileDeviceActivity : AppCompatActivity() {
     }
 
     private fun checkPermissionsAndStart(device: AirPlayDevice) {
+        if (RaopCapabilities.requiresUnsupportedFairPlay(device.features)) {
+            Toast.makeText(
+                this,
+                getString(R.string.fairplay_required_message, device.displayName),
+                Toast.LENGTH_LONG
+            ).show()
+            finish()
+            return
+        }
+
         val permissions = arrayOf(
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.POST_NOTIFICATIONS

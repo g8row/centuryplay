@@ -1,7 +1,7 @@
 # airplay 1 (raop) protocol documentation
 
 > **status**: comprehensive reference based on reverse engineering and implementation
-> **last updated**: january 2026
+> **last updated**: may 2026
 
 this document provides a complete reference for the airplay 1 protocol (also known as raop - remote audio output protocol), based on reverse engineering and implementation experience with shairport-sync receivers.
 
@@ -562,6 +562,48 @@ to verify encryption is working:
 - check that your announce sdp includes `a=rsaaeskey:` and `a=aesiv:` lines
 - audio playing correctly with encryption keys = encryption is working
 
+### fairplay sapv2 receivers (`et=5`)
+
+Some receivers advertise RAOP on port 5000 but require Apple's FairPlay SAPv2 sender flow before accepting `ANNOUNCE`. Samsung AirScreen is the current test case:
+
+```
+_airplay._tcp  port 57000  model=AppleTV3,1 srcvers=220.68 vv=2 pk=...
+_raop._tcp     port 5000   cn=0,1,2,3 et=0,3,5 am=AppleTV3,1 pk=...
+```
+
+The important bit is `et=5` without `et=1`. That means FairPlay audio encryption is available, but the classic RSA AES key exchange (`a=rsaaeskey`) is not. A normal RSA/L16 RAOP sender can discover the receiver but will hang or time out around `ANNOUNCE`.
+
+A macOS Music capture to AirScreen showed that Apple still uses RAOP TCP 5000 for this audio path, but adds FairPlay before the usual RAOP session:
+
+```
+connection 1:
+  POST /fp-setup   phase 1, 16-byte FPLY body
+  POST /fp-setup   phase 2, 164-byte FPLY body
+  OPTIONS
+  close
+
+connection 2:
+  POST /fp-setup   phase 1
+  POST /fp-setup   phase 2
+  ANNOUNCE         AppleLossless + a=fpaeskey + a=aesiv
+  SETUP
+  RECORD
+```
+
+Observed phase 1 request body from macOS:
+
+```
+46 50 4c 59 02 01 01 00 00 00 00 04 02 00 03 bb
+```
+
+AirScreen returns a 142-byte phase 1 response and a 32-byte phase 2 response when the sender's phase 2 FairPlay message is valid. A dummy/random 164-byte phase 2 body gets rejected with a short 12-byte FPLY error:
+
+```
+1e 1e 1e 1e 02 01 04 9c 00 00 00 00
+```
+
+Current project behavior: receivers that advertise `et=5` but not `et=1` are treated as unsupported and the app shows a FairPlay-required message instead of attempting a session. Streaming to these devices requires a real sender-side FairPlay SAPv2 implementation that can produce the phase 2 message and `a=fpaeskey`; public AirPlay projects generally implement only the receiver-side decrypt path.
+
 ---
 
 ## troubleshooting
@@ -595,9 +637,10 @@ playTimeNtp = NOW + latency_ms (e.g., 2500ms)
 
 **symptom:** announce request times out.
 **causes:**
-1. server is airplay 2 only
-2. firewall blocking ports
-3. sdp format error
+1. server requires fairplay sapv2 (`et=5`) and does not support rsa (`et=1`)
+2. server is airplay 2 only
+3. firewall blocking ports
+4. sdp format error
 
 #### rsa decryption failed
 
@@ -667,5 +710,6 @@ example: `d1bc033e2a49@debian`
 
 ## changelog
 
+- **may 2026**: documented samsung/airscreen fairplay sapv2 findings and current unsupported-device behavior
 - **january 2026**: added comprehensive sync packet timing documentation, encryption details, troubleshooting guide
 - **december 2025**: initial protocol overview

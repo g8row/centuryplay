@@ -130,12 +130,13 @@ see [docs/airplay_protocol.md](docs/AIRPLAY_PROTOCOL.md) for detailed protocol d
 | apple tv (gen 2-3) | airplay 1 | working | |
 | apple tv 4k | airplay 2 | requires airplay 2 | in development |
 | homepod / mini | airplay 2 | requires airplay 2 | in development |
-| airscreen (android)| airplay 1 | issues | compatibility variations |
+| airscreen / samsung | raop + fairplay | unsupported | requires fairplay sapv2 (`et=5`) sender crypto |
 
 ## limitations
 
 - drm content: some apps block capture (netflix etc).
 - latency: inherent ~2s buffer latency.
+- fairplay-only receivers: devices advertising `et=5` without `et=1` require Apple's FairPlay SAPv2 audio encryption. centuryplay now detects this and shows an unsupported-device message instead of hanging on connect.
 
 ## changelog
 
