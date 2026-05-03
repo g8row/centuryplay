@@ -36,6 +36,8 @@ bin/
 # Logs
 *.log
 logcat*.txt
+airplay-mac-logs-*/
+*.pcap
 
 # OS files
 Thumbs.db

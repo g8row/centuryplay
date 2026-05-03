@@ -23,6 +23,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.airplay.streamer.databinding.ActivityMainBinding
 import com.airplay.streamer.discovery.AirPlayDevice
+import com.airplay.streamer.raop.RaopCapabilities
 import com.airplay.streamer.service.AudioCaptureService
 import com.airplay.streamer.ui.MainViewModel
 import com.airplay.streamer.ui.SpeakerAdapter
@@ -407,6 +408,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun checkPermissionsAndStart(device: AirPlayDevice) {
+        if (RaopCapabilities.requiresUnsupportedFairPlay(device.features)) {
+            showFairPlayUnsupportedDialog(device)
+            return
+        }
+
         val permissions = arrayOf(
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.POST_NOTIFICATIONS
@@ -422,6 +428,14 @@ class MainActivity : AppCompatActivity() {
             pendingDevice = device
             permissionLauncher.launch(notGranted.toTypedArray())
         }
+    }
+
+    private fun showFairPlayUnsupportedDialog(device: AirPlayDevice) {
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.fairplay_required_title)
+            .setMessage(getString(R.string.fairplay_required_message, device.displayName))
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
     }
 
     private fun requestMediaProjection(device: AirPlayDevice) {

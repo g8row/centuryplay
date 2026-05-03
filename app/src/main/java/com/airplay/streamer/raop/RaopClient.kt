@@ -4,10 +4,8 @@ import android.util.Log
 import com.airplay.streamer.util.LogServer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.io.OutputStreamWriter
-import java.io.PrintWriter
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
@@ -30,11 +28,11 @@ import kotlin.random.Random
 class RaopClient(
     private val host: String,
     private val port: Int,
-    deviceFeatures: Map<String, String> = emptyMap()
+    private val deviceFeatures: Map<String, String> = emptyMap()
 ) {
     companion object {
         private const val TAG = "RaopClient"
-        private const val USER_AGENT = "iTunes/12.3 (Windows; N)"
+        private const val USER_AGENT = "Music/1.5.6 (Macintosh; OS X 15.7.3) AppleWebKit/621.3.11.11.3"
         private const val SAMPLE_RATE = 44100
         private const val CHANNELS = 2
         private const val BITS_PER_SAMPLE = 16
@@ -47,8 +45,7 @@ class RaopClient(
     private val activeRemote = Random.nextLong(100000000, 4294967295).toString()
 
     private var rtspSocket: Socket? = null
-    private var rtspReader: BufferedReader? = null
-    private var rtspWriter: PrintWriter? = null
+    private var rtspInput: InputStream? = null
     private var audioSocket: DatagramSocket? = null
     private var controlSocket: DatagramSocket? = null
     private var timingSocket: DatagramSocket? = null
@@ -71,8 +68,6 @@ class RaopClient(
     private var serverPort: Int = 0
     private var serverControlPort: Int = 0  // Server's control port for sync packets
     private var serverTimingPort: Int = 0   // Server's timing port
-    private var controlPort: Int = 0
-    private var timingPort: Int = 0
 
     private val isConnected = AtomicBoolean(false)
     private val isStreaming = AtomicBoolean(false)
@@ -80,12 +75,9 @@ class RaopClient(
     private var rtpSequence: Int = Random.nextInt(0xFFFF)
     private var rtpTimestamp: Long = Random.nextLong(0xFFFFFFFFL)
     private val ssrc: Int = Random.nextInt()
-
-    // Audio buffer for PCM data
     private val alacEncoder = AlacEncoder()
 
     // Apple's RSA Public Key for AirPlay (2048-bit) - from shairport-sync's super_secret_key
-    // This is the correct key that shairport-sync and other receivers use
     private val RSA_MODULUS = "59dE8qLieItsH1WgjrcFRKj6eUWqi+bGLOX1HL3U3GhC/j0Qg90u3sG/1CUtwC" +
             "5vOYvfDmFI6oSFXi5ELabWJmT2dKHzBJKa3k9ok+8t9ucRqMd6DZHJ2YCCLlDR" +
             "KSKv6kDqnw4UwPdpOMXziC/AMj3Z/lUVX1G7WSHCAWKf1zNS1eLvqr+boEjXuB" +
@@ -97,6 +89,7 @@ class RaopClient(
     private var aesKey: ByteArray? = null
     private var aesIv: ByteArray? = null
     private var aesCipher: Cipher? = null
+    private var fairPlaySetupValid = false
 
     interface StreamingCallback {
         fun onConnected()
@@ -105,6 +98,7 @@ class RaopClient(
     }
 
     var callback: StreamingCallback? = null
+
     /**
      * Connect to the AirPlay speaker
      */
@@ -116,11 +110,10 @@ class RaopClient(
             rtspSocket = Socket(host, port).apply { soTimeout = 5000 }
             localIp = rtspSocket!!.localAddress.hostAddress ?: "0.0.0.0"
             logD("RTSP socket connected, localIp=$localIp")
-            rtspReader = BufferedReader(InputStreamReader(rtspSocket!!.getInputStream(), Charsets.ISO_8859_1))
-            rtspWriter = PrintWriter(OutputStreamWriter(rtspSocket!!.getOutputStream(), Charsets.ISO_8859_1), true)
+            rtspInput = rtspSocket!!.getInputStream()
 
             logD("Connection 1: fp-setup...")
-            doFpSetup()
+            doFpSetup(mode = 0x00, requireValidPhase2 = false)
 
             logD("Testing OPTIONS...")
             val optionsResult = testOptions()
@@ -131,18 +124,18 @@ class RaopClient(
 
             // Connection 2: fp-setup × 2 + ANNOUNCE → SETUP → RECORD
             rtspSocket = Socket(host, port).apply { soTimeout = 10000 }
-            rtspReader = BufferedReader(InputStreamReader(rtspSocket!!.getInputStream(), Charsets.ISO_8859_1))
-            rtspWriter = PrintWriter(OutputStreamWriter(rtspSocket!!.getOutputStream(), Charsets.ISO_8859_1), true)
+            rtspInput = rtspSocket!!.getInputStream()
             logD("Reopened RTSP socket for ANNOUNCE")
 
             logD("Connection 2: fp-setup...")
-            doFpSetup()
+            fairPlaySetupValid = doFpSetup(mode = 0x03, requireValidPhase2 = true)
 
             // Create UDP sockets for audio/control/timing
             audioSocket = DatagramSocket()
             controlSocket = DatagramSocket()
             timingSocket = DatagramSocket()
             logD("UDP sockets: audio=${audioSocket?.localPort}, ctrl=${controlSocket?.localPort}, time=${timingSocket?.localPort}")
+            
             logD("Starting ANNOUNCE...")
             if (!announce()) {
                 logE("ANNOUNCE failed")
@@ -181,852 +174,97 @@ class RaopClient(
     /**
      * FairPlay SAPv2 stub handshake (POST /fp-setup × 2).
      * AirScreen requires this exchange before it accepts ANNOUNCE.
-     * Phase 1: send 16-byte FPLY challenge; server returns hardcoded 142-byte blob.
-     * Phase 2: send 164-byte FPLY message; server echoes 32 bytes back.
-     * We don't use the server's response for crypto — we just need the exchange to happen.
-     * After this, we send unencrypted L16 so no fpaeskey is needed.
      */
-    private fun doFpSetup() {
-        try {
-            // Phase 1 — 16-byte FPLY v3 message, mode=0 at offset 14
+    private fun doFpSetup(mode: Int, requireValidPhase2: Boolean): Boolean {
+        return try {
+            // Phase 1 - match macOS Music's FairPlay SAPv2 probe:
+            // FPLY 02 01 01 00 00 00 00 04 02 00 <mode> bb
             val phase1 = byteArrayOf(
                 0x46, 0x50, 0x4c, 0x59,  // FPLY magic
-                0x03, 0x01, 0x01, 0x00,  // version=3, type=1(setup), seq=1
-                0x00, 0x00, 0x00, 0x04,  // length field
-                0x00, 0x00, 0x00, 0x00   // [14]=mode=0
+                0x02, 0x01, 0x01, 0x00,  // version=2, type=1(setup), seq=1
+                0x00, 0x00, 0x00, 0x04,  // payload length
+                0x02, 0x00, mode.toByte(), 0xbb.toByte()
             )
-            sendFpSetupRequest(phase1, includeClientHeaders = false)
+            val headers1 = mutableMapOf(
+                "Content-Type" to "application/octet-stream",
+                "Content-Length" to phase1.size.toString()
+            )
+            sendRtspRequestDirect("POST", "/fp-setup", headers1, phase1)
+            
             val resp1 = parseRtspResponse()
             logD("fp-setup phase1 response: ${resp1?.first}")
             val len1 = resp1?.second?.get("Content-Length")?.toIntOrNull() ?: 0
             discardResponseBody(len1)
-
-            // Phase 2 — 164-byte FPLY v3 message; receiver checks [4]==3 and echoes [144..163]
-            val phase2 = ByteArray(164).also { b ->
-                b[0] = 0x46; b[1] = 0x50; b[2] = 0x4c; b[3] = 0x59  // FPLY
-                b[4] = 0x03  // version 3
-                b[5] = 0x01  // type = setup
-                b[6] = 0x03  // seq = 3 (SETUP2_MESSAGE_SEQ)
-                // bytes 7–163 left as zeros — receiver only echoes [144..163], ignores the rest
+            if (resp1?.first != 200 || len1 != 142) {
+                logD("fp-setup phase1 invalid: code=${resp1?.first}, length=$len1")
+                return false
             }
-            sendFpSetupRequest(phase2, includeClientHeaders = true)
+
+            // Phase 2 - 164-byte FPLY v2 key message stub. Bytes 12..163 are
+            // normally FairPlay output; random bytes let us test whether this
+            // receiver only requires the transport exchange before ANNOUNCE.
+            val phase2 = ByteArray(164).also { b ->
+                Random.nextBytes(b)
+                b[0] = 0x46; b[1] = 0x50; b[2] = 0x4c; b[3] = 0x59  // FPLY
+                b[4] = 0x02  // version 2
+                b[5] = 0x01  // type = setup
+                b[6] = 0x03  // seq = 3
+                b[7] = 0x00
+                b[8] = 0x00; b[9] = 0x00; b[10] = 0x00; b[11] = 0x98.toByte()
+                b[12] = mode.toByte()
+            }
+            val headers2 = mutableMapOf(
+                "Content-Type" to "application/octet-stream",
+                "Content-Length" to phase2.size.toString()
+            )
+            sendRtspRequestDirect("POST", "/fp-setup", headers2, phase2)
+            
             val resp2 = parseRtspResponse()
             logD("fp-setup phase2 response: ${resp2?.first}")
             val len2 = resp2?.second?.get("Content-Length")?.toIntOrNull() ?: 0
             discardResponseBody(len2)
+            val valid = resp2?.first == 200 && len2 == 32
+            if (!valid) {
+                logD("fp-setup phase2 invalid: code=${resp2?.first}, length=$len2")
+                if (requireValidPhase2) {
+                    logD("FairPlay phase2 requires Apple's proprietary key message; dummy body is not enough")
+                }
+            }
+            valid
         } catch (e: Exception) {
-            logD("fp-setup skipped: ${e.message}")
-            // Non-fatal — devices like shairport-sync don't support fp-setup and that's fine
-        }
-    }
-
-    private fun sendFpSetupRequest(body: ByteArray, includeClientHeaders: Boolean) {
-        val sb = StringBuilder()
-        sb.append("POST /fp-setup RTSP/1.0\r\n")
-        sb.append("CSeq: ${cSeq.incrementAndGet()}\r\n")
-        sb.append("Content-Type: application/octet-stream\r\n")
-        sb.append("Content-Length: ${body.size}\r\n")
-        if (includeClientHeaders) {
-            sb.append("User-Agent: $USER_AGENT\r\n")
-            sb.append("Client-Instance: $clientInstance\r\n")
-            sb.append("DACP-ID: $dacpId\r\n")
-            sb.append("Active-Remote: $activeRemote\r\n")
-        }
-        sb.append("\r\n")
-        // Write text headers, then raw binary body
-        rtspWriter?.print(sb.toString())
-        rtspWriter?.flush()
-        rtspSocket?.getOutputStream()?.write(body)
-        rtspSocket?.getOutputStream()?.flush()
-    }
-
-    /** Read and discard [length] bytes from the RTSP response body via the buffered reader. */
-    private fun discardResponseBody(length: Int) {
-        if (length <= 0) return
-        val buf = CharArray(length)
-        var remaining = length
-        var offset = 0
-        while (remaining > 0) {
-            val n = rtspReader?.read(buf, offset, remaining) ?: break
-            if (n < 0) break
-            offset += n
-            remaining -= n
+            logD("fp-setup skipped or failed: ${e.message}")
+            false
         }
     }
 
     /**
-     * OPTIONS - Query server capabilities (required before ANNOUNCE)
+     * Send RTSP request directly to OutputStream to avoid mixed stream issues
      */
-    private fun options(): Boolean {
-        val sb = StringBuilder()
-        sb.append("OPTIONS * RTSP/1.0\r\n")
-        sb.append("CSeq: ${cSeq.incrementAndGet()}\r\n")
-        sb.append("User-Agent: $USER_AGENT\r\n")
-        sb.append("Client-Instance: $clientInstance\r\n")
-        sb.append("DACP-ID: $dacpId\r\n")
-        sb.append("Active-Remote: $activeRemote\r\n")
-        sb.append("\r\n")
-        
-        val request = sb.toString()
-        Log.d(TAG, "OPTIONS request:\n$request")
-
-        rtspWriter?.print(request)
-        rtspWriter?.flush()
-
-        val response = parseRtspResponse()
-        Log.d(TAG, "OPTIONS response: code=${response?.first}, headers=${response?.second}")
-        // Some servers return 200, some return 501 (not implemented) but still work
-        return response != null && (response.first == 200 || response.first == 501)
-    }
-
-    private fun generateAppleChallenge(): String {
-        val bytes = ByteArray(16)
-        Random.nextBytes(bytes)
-        return Base64.getEncoder().encodeToString(bytes)
-    }
-
-    /**
-     * ANNOUNCE - Describe the audio format to the server
-     */
-    private fun announce(): Boolean {
-        // Generate encryption keys
-        generateKeys()
-        val rsaAesKey = encryptRsaAesKey()
-        if (rsaAesKey == null) {
-            logE("Failed to encrypt AES key")
-            return false
-        }
-        val aesIvBase64 = Base64.getEncoder().encodeToString(aesIv)
-
-        val localIp = rtspSocket?.localAddress?.hostAddress ?: "0.0.0.0"
-        val sdp = buildSdp(localIp, rsaAesKey, aesIvBase64)
-
-        logD("SDP content:\n$sdp")
-
-        val request = buildRtspRequest(
-            "ANNOUNCE",
-            mapOf(
-                "Content-Type" to "application/sdp",
-                "Content-Length" to sdp.toByteArray().size.toString()
-            ),
-            sdp
-        )
-        logD("ANNOUNCE request:\n$request")
-
-        rtspWriter?.print(request)
-        rtspWriter?.flush()
-
-        val response = parseRtspResponse()
-        logD("ANNOUNCE response: code=${response?.first}, headers=${response?.second}")
-        return response?.first == 200
-    }
-
-
-    /**
-     * Diagnostic: Test OPTIONS request
-     */
-    private fun testOptions(): Boolean {
-        try {
-            val challenge = generateAppleChallenge()
-            
-            val sb = StringBuilder()
-            sb.append("OPTIONS * RTSP/1.0\r\n")
-            sb.append("CSeq: ${cSeq.incrementAndGet()}\r\n")
-            sb.append("User-Agent: iTunes/10.6 (Windows; N)\r\n")
-            sb.append("Client-Instance: $clientInstance\r\n")
-            sb.append("DACP-ID: $dacpId\r\n")
-            sb.append("Active-Remote: $activeRemote\r\n")
-            sb.append("Apple-Challenge: $challenge\r\n")
-            sb.append("\r\n")
-            
-            val request = sb.toString()
-            logD("Diagnostic OPTIONS request:\n$request")
-
-
-            rtspWriter?.print(request)
-            rtspWriter?.flush()
-
-            val response = parseRtspResponse()
-            logD("Diagnostic OPTIONS response: code=${response?.first}")
-            response?.second?.forEach { (key, value) ->
-                logD("Header: $key = $value")
-            }
-            return response != null
-        } catch (e: Exception) {
-            logE("Diagnostic OPTIONS failed: ${e.message}")
-            return false
-        }
-    }
-
-    /**
-     * Generate random AES key and IV, and initialize the cipher
-     */
-    private fun generateKeys() {
-        aesKey = ByteArray(16)
-        aesIv = ByteArray(16)
-        Random.nextBytes(aesKey!!)
-        Random.nextBytes(aesIv!!)
-        
-        // Initialize AES-128-CBC cipher for audio encryption
-        try {
-            aesCipher = Cipher.getInstance("AES/CBC/NoPadding")
-            val keySpec = SecretKeySpec(aesKey, "AES")
-            val ivSpec = IvParameterSpec(aesIv)
-            aesCipher?.init(Cipher.ENCRYPT_MODE, keySpec, ivSpec)
-            logD("AES cipher initialized successfully")
-        } catch (e: Exception) {
-            logE("Failed to initialize AES cipher: ${e.message}")
-            aesCipher = null
-        }
-    }
-
-    /**
-     * Encrypt the AES key with Apple's standard AirPlay RSA Public Key
-     * shairport-sync uses RSA-OAEP with SHA-1 for decryption
-     */
-    private fun encryptRsaAesKey(): String? {
-        try {
-            // Decode the modulus and exponent from base64
-            val modulusBytes = Base64.getDecoder().decode(RSA_MODULUS)
-            val exponentBytes = Base64.getDecoder().decode(RSA_EXPONENT)
-            
-            val modulus = BigInteger(1, modulusBytes)
-            val exponent = BigInteger(1, exponentBytes)
-            
-            val spec = RSAPublicKeySpec(modulus, exponent)
-            val factory = KeyFactory.getInstance("RSA")
-            val publicKey = factory.generatePublic(spec)
-            
-            // shairport-sync expects RSA-OAEP with SHA-1 (not PKCS1 v1.5)
-            val cipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA-1AndMGF1Padding")
-            cipher.init(Cipher.ENCRYPT_MODE, publicKey)
-            
-            val encryptedKey = cipher.doFinal(aesKey)
-            return Base64.getEncoder().encodeToString(encryptedKey)
-        } catch (e: Exception) {
-            logE("RSA Encryption failed: ${e.message}")
-            return null
-        }
-    }
-
-    /**
-     * SETUP - Configure the streaming ports
-     */
-
-    private fun setup(): Boolean {
-        val localControlPort = controlSocket?.localPort ?: return false
-        val localTimingPort = timingSocket?.localPort ?: return false
-        
-        Log.d(TAG, "SETUP with control_port=$localControlPort, timing_port=$localTimingPort")
-
-        // Start timing responder thread
-        startTimingResponder()
-
-        val request = buildRtspRequest(
-            "SETUP",
-            mapOf(
-                "Transport" to "RTP/AVP/UDP;unicast;interleaved=0-1;mode=record;control_port=$localControlPort;timing_port=$localTimingPort"
-            )
-        )
-        logD("SETUP request:\n$request")
-
-        rtspWriter?.print(request)
-        rtspWriter?.flush()
-
-        val response = parseRtspResponse()
-        logD("SETUP response: code=${response?.first}")
-        
-        if (response != null && response.first == 200) {
-            // Parse Transport header for server ports
-            val transportHeader = response.second["Transport"] ?: return false
-            parseTransportHeader(transportHeader)
-            logD("SETUP succeeded - serverPort=$serverPort")
-
-            // Parse Session header
-            val sessionVal = response.second["Session"]
-            if (sessionVal != null) {
-                serverSessionId = sessionVal.split(";")[0].trim()
-                logD("Captured server session ID: $serverSessionId")
-            }
-            return true
-        }
-        return false
-    }
-
-    private fun startTimingResponder() {
-        val socket = timingSocket ?: return
-        logD("startTimingResponder called. Socket port: ${socket.localPort}")
-        isTimingRunning.set(true)
-        Thread {
-            logD("Timing thread started execution")
-            val buffer = ByteArray(128)
-            val packet = DatagramPacket(buffer, buffer.size)
-            var timingPacketCount = 0
-            try {
-                while (isTimingRunning.get() && !socket.isClosed) {
-                    socket.receive(packet)
-                    timingPacketCount++
-                    
-                    // Log packet details for debugging
-                    if (timingPacketCount <= 5 || timingPacketCount % 100 == 0) {
-                        val req = packet.data
-                        val type = req[1].toInt() and 0xFF
-                        logD("Timing Packet #$timingPacketCount: type=0x${type.toString(16)}, len=${packet.length}, from=${packet.address}:${packet.port}")
-                    }
-                    
-                    if (packet.length >= 32) { 
-                        val req = packet.data
-                        val response = ByteArray(packet.length)
-                        
-                        // Copy header (first 8 bytes)
-                        System.arraycopy(req, 0, response, 0, 8)
-                        
-                        // Set Type to Reply (0x53 | 0x80 = 0xD3)
-                        response[1] = (0x53 or 0x80).toByte()
-                        
-                        // NTP Logic: Copy T_xmit (24-31) to T_orig (8-15)
-                        System.arraycopy(req, 24, response, 8, 8)
-                        
-                        // Current time
-                        val now = System.currentTimeMillis()
-                        val ntpSec = (now / 1000) + 2208988800L
-                        val ntpFrac = ((now % 1000) * 4294967296.0 / 1000.0).toLong()
-                        
-                        // Write T_recv (16-23) and T_xmit (24-31)
-                        writeNtpTimestamp(response, 16, ntpSec, ntpFrac)
-                        writeNtpTimestamp(response, 24, ntpSec, ntpFrac)
-
-                        val reply = DatagramPacket(response, packet.length, packet.address, packet.port)
-                        socket.send(reply)
-                        
-                        if (timingPacketCount <= 5) {
-                            logD("Timing Response #$timingPacketCount sent: sec=$ntpSec, frac=$ntpFrac")
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                if (isTimingRunning.get()) {
-                    logE("Timing thread error: ${e.message}")
-                    // If timing fails and we're still supposed to be connected, trigger disconnect
-                    if (isConnected.get()) {
-                        logE("Timing socket closed unexpectedly - server may have disconnected")
-                        handleServerDisconnect()
-                    }
-                }
-            }
-            logD("Timing thread finished. Total packets handled: $timingPacketCount")
-        }.start()
-    }
-    
-    private fun writeNtpTimestamp(buffer: ByteArray, offset: Int, seconds: Long, fraction: Long) {
-        // Seconds (32-bit big endian)
-        buffer[offset] = (seconds shr 24).toByte()
-        buffer[offset+1] = (seconds shr 16).toByte()
-        buffer[offset+2] = (seconds shr 8).toByte()
-        buffer[offset+3] = (seconds).toByte()
-        
-        // Fraction (32-bit big endian)
-        buffer[offset+4] = (fraction shr 24).toByte()
-        buffer[offset+5] = (fraction shr 16).toByte()
-        buffer[offset+6] = (fraction shr 8).toByte()
-        buffer[offset+7] = (fraction).toByte()
-    }
-
-    /**
-     * Start sync packet sender - sends RTP timestamp to NTP time mapping to the receiver
-     * This is essential for the receiver to know when to play audio frames
-     */
-    private fun startSyncSender() {
-        val socket = controlSocket ?: return
-        if (serverControlPort == 0) {
-            logE("Cannot start sync sender - serverControlPort is 0")
-            return
-        }
-        
-        logD("Starting sync sender to $host:$serverControlPort")
-        isSyncRunning.set(true)
-        syncSequence = 0
-        
-        // Record the starting point: this RTP timestamp corresponds to this NTP time + latency
-        // Latency of ~2.5 seconds (110250 samples) gives the receiver time to buffer
-        val latencyMs = 2500L
-        val latencySamples = (latencyMs * SAMPLE_RATE / 1000)
-        syncStartRtpTimestamp = rtpTimestamp
-        syncStartTimeMs = System.currentTimeMillis()
-        
-        logD("Sync timing established: rtpTimestamp=$syncStartRtpTimestamp at time=$syncStartTimeMs, latency=${latencyMs}ms")
-        
-        Thread {
-            try {
-                val address = InetAddress.getByName(host)
-                var lastSyncTime = 0L
-                
-                while (isSyncRunning.get() && !socket.isClosed) {
-                    val now = System.currentTimeMillis()
-                    
-                    // Send sync packet every 300ms
-                    if (now - lastSyncTime >= 300) {
-                        // Calculate what RTP timestamp corresponds to NOW + latency
-                        // elapsed = time since we started
-                        val elapsedMs = now - syncStartTimeMs
-                        // The RTP timestamp that should play at (now + latency) is:
-                        // startRtp + elapsed_samples
-                        val elapsedSamples = (elapsedMs * SAMPLE_RATE / 1000)
-                        val currentPlayRtp = syncStartRtpTimestamp + elapsedSamples
-                        
-                        // The NTP time for this RTP timestamp is: now + latency
-                        val playTimeMs = now + latencyMs
-                        
-                        // Build sync packet
-                        val syncPacket = buildSyncPacket(currentPlayRtp, playTimeMs, latencySamples)
-                        val packet = DatagramPacket(syncPacket, syncPacket.size, address, serverControlPort)
-                        socket.send(packet)
-                        
-                        syncSequence++
-                        if (syncSequence <= 5 || syncSequence % 20 == 0) {
-                            logD("Sync #$syncSequence: playRtp=$currentPlayRtp, playTime=$playTimeMs, currentRtp=$rtpTimestamp")
-                        }
-                        lastSyncTime = now
-                    }
-                    
-                    Thread.sleep(50) // Check every 50ms
-                }
-            } catch (e: Exception) {
-                if (isSyncRunning.get()) {
-                    logE("Sync sender error: ${e.message}")
-                }
-            }
-            logD("Sync sender finished")
-        }.start()
-    }
-    
-    // Sync timing variables
-    private var syncStartRtpTimestamp: Long = 0
-    private var syncStartTimeMs: Long = 0
-    
-    /**
-     * Build an AirPlay sync/control packet
-     * Format (20 bytes):
-     * - byte 0: 0x80 (RTP version 2) or 0x90 (with extension, for first sync)
-     * - byte 1: 0xd4 (payload type 84 = sync)
-     * - bytes 2-3: sequence number (big-endian)
-     * - bytes 4-7: RTP timestamp that should play at the given NTP time (big-endian)
-     * - bytes 8-15: NTP timestamp when the RTP audio should play (64-bit big-endian)
-     * - bytes 16-19: RTP timestamp + latency for next sync point (big-endian)
-     */
-    private fun buildSyncPacket(playRtp: Long, playTimeMs: Long, latencySamples: Long): ByteArray {
-        val packet = ByteArray(20)
-        
-        // Header: version 2, with extension bit for first packet
-        packet[0] = if (syncSequence == 0) 0x90.toByte() else 0x80.toByte()
-        packet[1] = 0xd4.toByte()  // Payload type 84 (sync)
-        
-        // Sequence number (big-endian)
-        packet[2] = (syncSequence shr 8).toByte()
-        packet[3] = syncSequence.toByte()
-        
-        // RTP timestamp that should play at the NTP time below (big-endian)
-        packet[4] = (playRtp shr 24).toByte()
-        packet[5] = (playRtp shr 16).toByte()
-        packet[6] = (playRtp shr 8).toByte()
-        packet[7] = playRtp.toByte()
-        
-        // NTP timestamp when playRtp should be played (64-bit big-endian)
-        val ntpSec = (playTimeMs / 1000) + 2208988800L
-        val ntpFrac = ((playTimeMs % 1000) * 4294967296.0 / 1000.0).toLong()
-        writeNtpTimestamp(packet, 8, ntpSec, ntpFrac)
-        
-        // Next RTP timestamp (play point + latency)
-        val nextRtp = playRtp + latencySamples
-        packet[16] = (nextRtp shr 24).toByte()
-        packet[17] = (nextRtp shr 16).toByte()
-        packet[18] = (nextRtp shr 8).toByte()
-        packet[19] = nextRtp.toByte()
-        
-        return packet
-    }
-    
-    private fun stopSyncSender() {
-        isSyncRunning.set(false)
-    }
-    
-    /**
-     * Start connection health monitor
-     * Monitors the TCP RTSP socket to detect if the server has disconnected
-     */
-    private fun startHealthMonitor() {
-        logD("startHealthMonitor() called")
-        
-        // Ensure any previous health monitor is stopped first
-        if (isHealthMonitorRunning.get()) {
-            logD("Stopping previous health monitor first")
-            stopHealthMonitor()
-        }
-        
-        logD("Starting connection health monitor thread")
-        isHealthMonitorRunning.set(true)
-        
-        Thread {
-            logD("Health monitor thread started")
-            try {
-                while (isHealthMonitorRunning.get() && isConnected.get()) {
-                    Thread.sleep(HEALTH_CHECK_INTERVAL_MS)
-                    
-                    if (!isHealthMonitorRunning.get() || !isConnected.get()) break
-                    
-                    // Check if TCP socket is still valid
-                    val currentSocket = rtspSocket
-                    if (currentSocket == null || currentSocket.isClosed || !currentSocket.isConnected) {
-                        logE("Health check: RTSP socket is closed/disconnected")
-                        handleServerDisconnect()
-                        break
-                    }
-                    
-                    logD("Health check: socket alive")
-                    
-                    // The most reliable way to detect if the server closed the connection
-                    // is to actually try to read from the socket with a short timeout
-                    // If server closed, read() returns -1 (EOF) or throws an exception
-                    try {
-                        currentSocket.soTimeout = 100  // Very short timeout
-                        val inputStream = currentSocket.getInputStream()
-                        
-                        // Actually try to read - this is the key difference
-                        // read() will return -1 if the server has closed the connection
-                        val result = inputStream.read()
-                        if (result == -1) {
-                            logE("Health check: Server closed connection (EOF received)")
-                            handleServerDisconnect()
-                            break
-                        } else {
-                            // We got unexpected data from the server
-                            // This is fine, might be an async notification
-                            logD("Health check: Received data from server: $result")
-                        }
-                    } catch (e: java.net.SocketTimeoutException) {
-                        // Timeout is expected and fine - means socket is still alive but no data
-                        logD("Health check: socket OK (timeout, no data)")
-                    } catch (e: java.io.IOException) {
-                        logE("Health check: socket read failed - ${e.message}")
-                        handleServerDisconnect()
-                        break
-                    } finally {
-                        // Restore original timeout
-                        try { currentSocket.soTimeout = 10000 } catch (_: Exception) {}
-                    }
-                }
-            } catch (e: Exception) {
-                if (isHealthMonitorRunning.get()) {
-                    logE("Health monitor error: ${e.message}")
-                }
-            }
-            logD("Health monitor finished")
-        }.start()
-    }
-    
-    private fun stopHealthMonitor() {
-        isHealthMonitorRunning.set(false)
-    }
-    
-    /**
-     * Handle unexpected server disconnect
-     * Called when we detect the server has stopped responding
-     */
-    private fun handleServerDisconnect() {
-        if (!isConnected.get()) return  // Already disconnected
-        
-        logE("Server disconnect detected - cleaning up")
-        
-        // Set flags immediately
-        isStreaming.set(false)
-        isConnected.set(false)
-        
-        // Stop all background threads
-        stopHealthMonitor()
-        stopSyncSender()
-        stopTimingResponder()
-        
-        // Close sockets (don't wait for TEARDOWN since server is gone)
-        try { audioSocket?.close() } catch (_: Exception) {}
-        audioSocket = null
-        try { controlSocket?.close() } catch (_: Exception) {}
-        controlSocket = null
-        try { timingSocket?.close() } catch (_: Exception) {}
-        timingSocket = null
-        try { rtspWriter?.close() } catch (_: Exception) {}
-        rtspWriter = null
-        try { rtspReader?.close() } catch (_: Exception) {}
-        rtspReader = null
-        try { rtspSocket?.close() } catch (_: Exception) {}
-        rtspSocket = null
-        
-        // Reset state
-        serverPort = 0
-        serverControlPort = 0
-        serverTimingPort = 0
-        serverSessionId = null
-        
-        // Clear audio buffer
-        synchronized(audioBuffer) {
-            audioBuffer.reset()
-        }
-        
-        logD("Server disconnect cleanup complete")
-        callback?.onError("Server disconnected")
-        callback?.onDisconnected()
-    }
-    
-    // ...
-
-    /**
-     * RECORD - Start the streaming session
-     */
-    private fun record(): Boolean {
-        // Ensure Content-Length is STRICTLY omitted from header map
-        val headerMap = mapOf(
-            "Range" to "npt=0-",
-            "RTP-Info" to "seq=$rtpSequence;rtptime=$rtpTimestamp"
-        )
-        
-        val request = buildRtspRequest(
-            "RECORD",
-            headerMap,
-            body = "",
-            sessionId = serverSessionId 
-        )
-        logD("RECORD request (Check for Content-Length):\n$request")
-
-        rtspWriter?.print(request)
-        rtspWriter?.flush()
-
-        val response = parseRtspResponse()
-        logD("RECORD response: code=${response?.first}")
-        
-        if (response?.first == 200) {
-            isStreaming.set(true)
-            // Start sending sync packets to tell receiver when to play audio
-            startSyncSender()
-            // Start connection health monitor
-            startHealthMonitor()
-            return true
-        }
-        return false
-    }
-
-    // Audio buffer for PCM data
-    private val audioBuffer = java.io.ByteArrayOutputStream()
-    private val PACKET_SIZE = 1408 // 352 frames * 4 bytes
-    private var debugPacketCount = 0
-
-    /**
-     * Stream PCM audio data
-     * @param pcmData PCM audio samples (16-bit stereo, 44100Hz, Little Endian)
-     */
-    suspend fun streamAudio(pcmData: ByteArray) = withContext(Dispatchers.IO) {
-        if (!isStreaming.get() || audioSocket == null) return@withContext
-
-        try {
-            // Append new data to buffer
-            synchronized(audioBuffer) {
-                audioBuffer.write(pcmData)
-            }
-
-            // Process full packets
-            val bufferBytes = synchronized(audioBuffer) { audioBuffer.toByteArray() }
-            if (bufferBytes.size >= PACKET_SIZE) {
-                var offset = 0
-                while (offset + PACKET_SIZE <= bufferBytes.size) {
-                    val chunk = bufferBytes.copyOfRange(offset, offset + PACKET_SIZE)
-                    
-                    // Debug Logging: Calculate RMS periodically
-                    debugPacketCount++
-                    if (debugPacketCount % 50 == 0) {
-                        var sum = 0.0
-                        val samples = chunk.size / 2 // 16-bit samples
-                        for (i in 0 until chunk.size step 2) {
-                             val sample = ((chunk[i+1].toInt() shl 8) or (chunk[i].toInt() and 0xFF)).toShort()
-                             sum += sample.toDouble() * sample.toDouble()
-                        }
-                        val rms = Math.sqrt(sum / samples).toInt()
-                        LogServer.log("SND: Pkt $rtpSequence, RMS=$rms (Max 32767), Vol=${Math.round(20 * Math.log10(rms.toDouble()))}dB")
-                    }
-
-                    // L16 requires big-endian (network byte order)
-                    val beData = swapEndianness(chunk)
-
-                    val payloadData = if (useEncryption) {
-                        encryptAudio(beData)
-                    } else {
-                        beData
-                    }
-                    
-                    // Build RTP packet with payload
-                    val rtpPacket = buildRtpPacket(payloadData)
-
-                    // Send to server
-                    val address = InetAddress.getByName(host)
-                    val packet = DatagramPacket(rtpPacket, rtpPacket.size, address, serverPort)
-                    audioSocket?.send(packet)
-
-                    // Update sequence and timestamp
-                    rtpSequence = (rtpSequence + 1) and 0xFFFF
-                    rtpTimestamp += FRAMES_PER_PACKET
-                    
-                    offset += PACKET_SIZE
-                }
-                
-                // Keep remaining bytes
-                synchronized(audioBuffer) {
-                    audioBuffer.reset()
-                    if (offset < bufferBytes.size) {
-                        val remaining = bufferBytes.copyOfRange(offset, bufferBytes.size)
-                        audioBuffer.write(remaining)
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            callback?.onError("Streaming error: ${e.message}")
-        }
-    }
-
-    /**
-     * Set volume (0.0 to 1.0)
-     */
-    suspend fun setVolume(volume: Float): Boolean = withContext(Dispatchers.IO) {
-        if (!isConnected.get()) return@withContext false
-
-        // AirPlay volume is in dB, -144 (mute) to 0 (max)
-        val dbVolume = if (volume <= 0f) -144f else (volume * 30f - 30f)
-        val volumeStr = "volume: $dbVolume\r\n"
-
-        val request = buildRtspRequest(
-            "SET_PARAMETER",
-            mapOf(
-                "Content-Type" to "text/parameters",
-                "Content-Length" to volumeStr.length.toString()
-            ),
-            volumeStr
-        )
-
-        rtspWriter?.print(request)
-        rtspWriter?.flush()
-
-        parseRtspResponse()?.first == 200
-    }
-
-    /**
-     * Disconnect from the speaker - robust teardown with proper cleanup
-     * This ensures all threads are stopped, all sockets are closed, and TEARDOWN is sent
-     */
-    suspend fun disconnect() = withContext(Dispatchers.IO) {
-        logD("disconnect() called - starting robust teardown")
-        
-        // First, stop all flags to signal threads to exit
-        val wasStreaming = isStreaming.getAndSet(false)
-        val wasConnected = isConnected.getAndSet(false)
-        
-        // Stop background threads immediately
-        logD("Stopping health monitor...")
-        stopHealthMonitor()
-        
-        logD("Stopping sync sender...")
-        stopSyncSender()
-        
-        logD("Stopping timing responder...")
-        stopTimingResponder()
-        
-        // Give threads a moment to notice the flags
-        try { Thread.sleep(100) } catch (_: Exception) {}
-        
-        // Send TEARDOWN if we were connected (with timeout)
-        if (wasConnected) {
-            try {
-                logD("Sending TEARDOWN request...")
-                rtspSocket?.soTimeout = 2000  // 2 second timeout for teardown
-                val request = buildRtspRequest("TEARDOWN", sessionId = serverSessionId)
-                rtspWriter?.print(request)
-                rtspWriter?.flush()
-                val response = parseRtspResponse()
-                logD("TEARDOWN response: ${response?.first}")
-            } catch (e: Exception) {
-                logD("TEARDOWN failed (expected if connection lost): ${e.message}")
-            }
-        }
-        
-        // Close RTSP connection
-        logD("Closing RTSP socket...")
-        try {
-            rtspWriter?.close()
-        } catch (_: Exception) {}
-        rtspWriter = null
-        
-        try {
-            rtspReader?.close()
-        } catch (_: Exception) {}
-        rtspReader = null
-        
-        try {
-            rtspSocket?.close()
-        } catch (_: Exception) {}
-        rtspSocket = null
-        
-        // Close UDP sockets (this will unblock any blocking receive() calls)
-        logD("Closing UDP sockets...")
-        try {
-            audioSocket?.close()
-        } catch (_: Exception) {}
-        audioSocket = null
-        
-        try {
-            controlSocket?.close()
-        } catch (_: Exception) {}
-        controlSocket = null
-        
-        try {
-            timingSocket?.close()
-        } catch (_: Exception) {}
-        timingSocket = null
-        
-        // Reset state
-        serverPort = 0
-        serverControlPort = 0
-        serverTimingPort = 0
-        serverSessionId = null
-        syncSequence = 0
-        syncStartRtpTimestamp = 0
-        syncStartTimeMs = 0
-        
-        // Clear audio buffer
-        synchronized(audioBuffer) {
-            audioBuffer.reset()
-        }
-        
-        logD("Teardown complete")
-        callback?.onDisconnected()
-    }
-    
-    /**
-     * Stop the timing responder thread safely
-     */
-    private fun stopTimingResponder() {
-        isTimingRunning.set(false)
-        // Socket close will interrupt the blocking receive()
-    }
-
-    private fun buildRtspRequest(
+    private fun sendRtspRequestDirect(
         method: String,
+        url: String,
         headers: Map<String, String> = emptyMap(),
-        body: String = "",
+        body: ByteArray? = null,
         sessionId: String? = null
-    ): String {
+    ) {
         val sb = StringBuilder()
-        // AirPlay uses the client's own IP in the RTSP URL (not the server's)
-        sb.append("$method rtsp://$localIp/$localSessionId RTSP/1.0\r\n")
+        // Determine the correct URL
+        val requestUrl = if (url.startsWith("/") || url == "*") url else url
+        
+        sb.append("$method $requestUrl RTSP/1.0\r\n")
         sb.append("CSeq: ${cSeq.incrementAndGet()}\r\n")
-        sb.append("User-Agent: $USER_AGENT\r\n")
-        sb.append("Client-Instance: $clientInstance\r\n")
-        sb.append("DACP-ID: $dacpId\r\n")
-        sb.append("Active-Remote: $activeRemote\r\n")
+        if (!headers.containsKey("User-Agent")) {
+            sb.append("User-Agent: $USER_AGENT\r\n")
+        }
+        if (!headers.containsKey("Client-Instance")) {
+            sb.append("Client-Instance: $clientInstance\r\n")
+        }
+        if (!headers.containsKey("DACP-ID")) {
+            sb.append("DACP-ID: $dacpId\r\n")
+        }
+        if (!headers.containsKey("Active-Remote")) {
+            sb.append("Active-Remote: $activeRemote\r\n")
+        }
 
         if (sessionId != null) {
             sb.append("Session: $sessionId\r\n")
@@ -1035,197 +273,455 @@ class RaopClient(
         headers.forEach { (key, value) ->
             sb.append("$key: $value\r\n")
         }
-
         sb.append("\r\n")
-        sb.append(body)
+        
+        val headerStr = sb.toString()
+        if (method != "RECORD") {
+            logD("$method request:\n$headerStr")
+            if (body != null && (method == "POST" || method == "ANNOUNCE")) {
+                logD("$method body (${body.size} bytes): ${hexDump(body, maxBytes = 48)}")
+            }
+        }
 
-        return sb.toString()
+        try {
+            val out = rtspSocket?.getOutputStream() ?: return
+            out.write(headerStr.toByteArray(Charsets.ISO_8859_1))
+            if (body != null) {
+                out.write(body)
+            }
+            out.flush()
+        } catch (e: Exception) {
+            logE("Failed to send RTSP request: ${e.message}")
+        }
     }
 
     private fun parseRtspResponse(): Pair<Int, Map<String, String>>? {
         val headers = mutableMapOf<String, String>()
+        try {
+            val input = rtspInput ?: return null
+            val headerBytes = readUntilHeaderEnd(input)
+            if (headerBytes.isEmpty()) {
+                logE("parseRtspResponse: statusLine is null (connection closed?)")
+                return null
+            }
+            val headerText = headerBytes.toString(Charsets.ISO_8859_1)
+            val lines = headerText.split("\r\n")
+            val statusLine = lines.firstOrNull { it.isNotEmpty() } ?: return null
+            logD("parseRtspResponse: statusLine = $statusLine")
+            val statusCode = statusLine.split(" ").getOrNull(1)?.toIntOrNull() ?: return null
 
-        val statusLine = rtspReader?.readLine() ?: return null
-        val statusCode = statusLine.split(" ").getOrNull(1)?.toIntOrNull() ?: return null
+            for (line in lines.drop(1)) {
+                if (line.isEmpty()) break
 
+                val colonIndex = line.indexOf(':')
+                if (colonIndex > 0) {
+                    val key = line.substring(0, colonIndex).trim()
+                    val value = line.substring(colonIndex + 1).trim()
+                    headers[key] = value
+                }
+            }
+            return statusCode to headers
+        } catch (e: Exception) {
+            logE("parseRtspResponse error: ${e.message}")
+            return null
+        }
+    }
+
+    private fun discardResponseBody(length: Int) {
+        if (length <= 0) return
+        try {
+            val input = rtspInput ?: return
+            val body = ByteArray(length)
+            var remaining = length
+            var offset = 0
+            while (remaining > 0) {
+                val n = input.read(body, offset, remaining)
+                if (n < 0) break
+                offset += n
+                remaining -= n
+            }
+            logD("RTSP response body (${length - remaining}/$length bytes): ${hexDump(body, maxBytes = 48)}")
+        } catch (e: Exception) {
+            logE("Error discarding response body: ${e.message}")
+        }
+    }
+
+    private fun readUntilHeaderEnd(input: InputStream): ByteArray {
+        val out = ByteArrayOutputStream()
+        var last4 = 0
         while (true) {
-            val line = rtspReader?.readLine() ?: break
-            if (line.isEmpty()) break
+            val b = input.read()
+            if (b < 0) break
+            out.write(b)
+            last4 = ((last4 shl 8) or b) and 0xFFFFFFFF.toInt()
+            if (last4 == 0x0D0A0D0A) break
+        }
+        return out.toByteArray()
+    }
 
-            val colonIndex = line.indexOf(':')
-            if (colonIndex > 0) {
-                val key = line.substring(0, colonIndex).trim()
-                val value = line.substring(colonIndex + 1).trim()
-                headers[key] = value
+    private fun hexDump(data: ByteArray, maxBytes: Int = data.size): String {
+        val shown = data.take(maxBytes).joinToString(" ") { "%02x".format(it) }
+        return if (data.size > maxBytes) "$shown ..." else shown
+    }
+
+    private fun testOptions(): Boolean {
+        val challenge = generateAppleChallenge()
+        val headers = mapOf(
+            "User-Agent" to "iTunes/10.6 (Windows; N)",
+            "Apple-Challenge" to challenge
+        )
+        sendRtspRequestDirect("OPTIONS", "*", headers)
+        val response = parseRtspResponse()
+        logD("Diagnostic OPTIONS response: code=${response?.first}")
+        return response != null
+    }
+
+    private fun announce(): Boolean {
+        if (useFairPlayStub && !fairPlaySetupValid) {
+            logE("FairPlay setup failed; refusing to ANNOUNCE dummy fpaeskey to avoid receiver hang")
+            return false
+        }
+        generateKeys()
+        val rsaAesKey = if (useEncryption) encryptRsaAesKey() ?: return false else null
+        val aesIvBase64 = if (useEncryption) Base64.getEncoder().encodeToString(aesIv) else null
+        val sdp = buildSdp(localIp, rsaAesKey, aesIvBase64)
+
+        val headers = mapOf(
+            "Content-Type" to "application/sdp",
+            "Content-Length" to sdp.toByteArray(Charsets.ISO_8859_1).size.toString()
+        )
+        sendRtspRequestDirect("ANNOUNCE", "rtsp://$localIp/$localSessionId", headers, sdp.toByteArray(Charsets.ISO_8859_1))
+
+        val response = parseRtspResponse()
+        return response?.first == 200
+    }
+
+    private fun setup(): Boolean {
+        val localControlPort = controlSocket?.localPort ?: return false
+        val localTimingPort = timingSocket?.localPort ?: return false
+        
+        startTimingResponder()
+
+        val headers = mapOf(
+            "Transport" to "RTP/AVP/UDP;unicast;interleaved=0-1;mode=record;control_port=$localControlPort;timing_port=$localTimingPort"
+        )
+        sendRtspRequestDirect("SETUP", "rtsp://$localIp/$localSessionId", headers, sessionId = serverSessionId)
+
+        val response = parseRtspResponse()
+        if (response != null && response.first == 200) {
+            val transportHeader = response.second["Transport"] ?: return false
+            parseTransportHeader(transportHeader)
+            
+            val sessionVal = response.second["Session"]
+            if (sessionVal != null) {
+                serverSessionId = sessionVal.split(";")[0].trim()
+            }
+            return true
+        }
+        return false
+    }
+
+    private fun record(): Boolean {
+        val headers = mapOf(
+            "Range" to "npt=0-",
+            "RTP-Info" to "seq=$rtpSequence;rtptime=$rtpTimestamp"
+        )
+        sendRtspRequestDirect("RECORD", "rtsp://$localIp/$localSessionId", headers, sessionId = serverSessionId)
+        val response = parseRtspResponse()
+        if (response?.first == 200) {
+            isStreaming.set(true)
+            startSyncSender()
+            startHealthMonitor()
+            return true
+        }
+        return false
+    }
+
+    suspend fun streamAudio(pcmData: ByteArray) = withContext(Dispatchers.IO) {
+        if (!isStreaming.get() || audioSocket == null) return@withContext
+        val packetSize = if (useFairPlayStub) alacEncoder.getExpectedPcmSize() else 1408
+        
+        synchronized(audioBuffer) {
+            audioBuffer.write(pcmData)
+        }
+
+        val bufferBytes = synchronized(audioBuffer) { audioBuffer.toByteArray() }
+        if (bufferBytes.size >= packetSize) {
+            var offset = 0
+            while (offset + packetSize <= bufferBytes.size) {
+                val chunk = bufferBytes.copyOfRange(offset, offset + packetSize)
+                val payloadData = if (useFairPlayStub) {
+                    alacEncoder.encode(chunk)
+                } else {
+                    val beData = swapEndianness(chunk)
+                    if (useEncryption) encryptAudio(beData) else beData
+                }
+                
+                val rtpPacket = buildRtpPacket(payloadData)
+                val address = InetAddress.getByName(host)
+                val packet = DatagramPacket(rtpPacket, rtpPacket.size, address, serverPort)
+                audioSocket?.send(packet)
+
+                rtpSequence = (rtpSequence + 1) and 0xFFFF
+                rtpTimestamp += FRAMES_PER_PACKET
+                offset += packetSize
+            }
+            synchronized(audioBuffer) {
+                audioBuffer.reset()
+                if (offset < bufferBytes.size) {
+                    audioBuffer.write(bufferBytes.copyOfRange(offset, bufferBytes.size))
+                }
             }
         }
-
-        return statusCode to headers
     }
 
-    private fun parseTransportHeader(transport: String) {
-        transport.split(";").forEach { part ->
-            val trimmedPart = part.trim()
-            when {
-                trimmedPart.startsWith("server_port=") -> {
-                    serverPort = trimmedPart.substringAfter("=").toIntOrNull() ?: 0
-                    logD("Parsed server_port (audio): $serverPort")
-                }
-                trimmedPart.startsWith("control_port=") -> {
-                    serverControlPort = trimmedPart.substringAfter("=").toIntOrNull() ?: 0
-                    logD("Parsed control_port (server): $serverControlPort")
-                }
-                trimmedPart.startsWith("timing_port=") -> {
-                    serverTimingPort = trimmedPart.substringAfter("=").toIntOrNull() ?: 0
-                    logD("Parsed timing_port (server): $serverTimingPort")
-                }
-            }
+    suspend fun setVolume(volume: Float): Boolean = withContext(Dispatchers.IO) {
+        if (!isConnected.get()) return@withContext false
+        val dbVolume = if (volume <= 0f) -144f else (volume * 30f - 30f)
+        val volumeStr = "volume: $dbVolume\r\n"
+        val headers = mapOf(
+            "Content-Type" to "text/parameters",
+            "Content-Length" to volumeStr.length.toString()
+        )
+        sendRtspRequestDirect("SET_PARAMETER", "rtsp://$localIp/$localSessionId", headers, volumeStr.toByteArray(Charsets.ISO_8859_1))
+        parseRtspResponse()?.first == 200
+    }
+
+    suspend fun disconnect() = withContext(Dispatchers.IO) {
+        logD("disconnect() called")
+        val wasConnected = isConnected.getAndSet(false)
+        isStreaming.set(false)
+        stopHealthMonitor()
+        stopSyncSender()
+        stopTimingResponder()
+        
+        if (wasConnected) {
+            try {
+                rtspSocket?.soTimeout = 2000
+                sendRtspRequestDirect("TEARDOWN", "rtsp://$localIp/$localSessionId", emptyMap(), sessionId = serverSessionId)
+                parseRtspResponse()
+            } catch (e: Exception) {}
         }
+        
+        try { rtspInput?.close() } catch (e: Exception) {}
+        try { rtspSocket?.close() } catch (e: Exception) {}
+        try { audioSocket?.close() } catch (e: Exception) {}
+        try { controlSocket?.close() } catch (e: Exception) {}
+        try { timingSocket?.close() } catch (e: Exception) {}
+        
+        rtspSocket = null
+        rtspInput = null
+        audioSocket = null
+        controlSocket = null
+        timingSocket = null
+        serverSessionId = null
+        logD("Teardown complete")
+        callback?.onDisconnected()
     }
 
-    // Use RSA encryption only if the receiver advertises et=1 in its TXT record.
-    // Devices like AirScreen advertise et=0,3,5 (no RSA), so we fall back to unencrypted.
-    private val supportedEncryptionTypes: Set<Int> = deviceFeatures["et"]
-        ?.split(",")?.mapNotNull { it.trim().toIntOrNull() }?.toSet()
-        ?: setOf(0, 1) // default: assume RSA supported if unknown
-    private var useEncryption = 1 in supportedEncryptionTypes
-    
-    private fun buildSdp(localIp: String, rsaAesKey: String, aesIv: String): String {
-        val baseSdp = """
-v=0
-o=iTunes $localSessionId 0 IN IP4 $localIp
-s=iTunes
-c=IN IP4 $host
-t=0 0
-m=audio 0 RTP/AVP 96
-a=rtpmap:96 L16/44100/2"""
-
-        return if (useEncryption) {
-            """
-$baseSdp
-a=rsaaeskey:$rsaAesKey
-a=aesiv:$aesIv
-""".trimIndent().replace("\n", "\r\n")
-        } else {
-            logD("No RSA support on receiver — streaming unencrypted L16")
-            baseSdp.trimIndent().replace("\n", "\r\n")
-        }
-    }
-
-    private fun buildRtpPacket(data: ByteArray): ByteArray {
-        val header = ByteArray(12)
-
-        // RTP header
-        header[0] = 0x80.toByte() // Version 2
-        header[1] = 0x60.toByte() // Payload type 96
-
-        // Sequence number (big endian)
-        header[2] = (rtpSequence shr 8).toByte()
-        header[3] = rtpSequence.toByte()
-
-        // Timestamp (big endian)
-        header[4] = (rtpTimestamp shr 24).toByte()
-        header[5] = (rtpTimestamp shr 16).toByte()
-        header[6] = (rtpTimestamp shr 8).toByte()
-        header[7] = rtpTimestamp.toByte()
-
-        // SSRC (big endian)
-        header[8] = (ssrc shr 24).toByte()
-        header[9] = (ssrc shr 16).toByte()
-        header[10] = (ssrc shr 8).toByte()
-        header[11] = ssrc.toByte()
-
-        return header + data
-    }
-
-    private fun generateSessionId(): String {
-        return Random.nextLong(0, Long.MAX_VALUE).toString()
-    }
-
-    private fun generateClientId(): String {
-        val bytes = ByteArray(8)
-        Random.nextBytes(bytes)
-        return bytes.joinToString("") { "%02X".format(it) }
-    }
-    
+    private val audioBuffer = java.io.ByteArrayOutputStream()
     private fun generateHexId(bytes: Int): String {
         val data = ByteArray(bytes)
         Random.nextBytes(data)
         return data.joinToString("") { "%02X".format(it) }
     }
-
-    /**
-     * Swap byte order for 16-bit PCM samples (little-endian to big-endian)
-     * L16 format (RFC 3551) requires network byte order (big-endian)
-     */
-    private fun swapEndianness(data: ByteArray): ByteArray {
-        val result = ByteArray(data.size)
-        for (i in 0 until data.size step 2) {
-            if (i + 1 < data.size) {
-                result[i] = data[i + 1]
-                result[i + 1] = data[i]
-            }
-        }
-        return result
+    
+    private fun generateAppleChallenge(): String {
+        val bytes = ByteArray(16)
+        Random.nextBytes(bytes)
+        return Base64.getEncoder().encodeToString(bytes)
     }
 
-    /**
-     * Encrypt audio data using AES-128-CBC
-     * AirPlay uses a modified CBC mode where only complete 16-byte blocks are encrypted,
-     * and the remaining bytes (< 16) are left unencrypted at the end.
-     * Each packet uses a fresh cipher starting from the original IV.
-     */
+    private fun generateKeys() {
+        aesKey = ByteArray(16); aesIv = ByteArray(16)
+        Random.nextBytes(aesKey!!); Random.nextBytes(aesIv!!)
+        try {
+            aesCipher = Cipher.getInstance("AES/CBC/NoPadding")
+            aesCipher?.init(Cipher.ENCRYPT_MODE, SecretKeySpec(aesKey, "AES"), IvParameterSpec(aesIv))
+        } catch (e: Exception) { aesCipher = null }
+    }
+
+    private fun encryptRsaAesKey(): String? {
+        try {
+            val modulus = BigInteger(1, Base64.getDecoder().decode(RSA_MODULUS))
+            val exponent = BigInteger(1, Base64.getDecoder().decode(RSA_EXPONENT))
+            val publicKey = KeyFactory.getInstance("RSA").generatePublic(RSAPublicKeySpec(modulus, exponent))
+            val cipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA-1AndMGF1Padding")
+            cipher.init(Cipher.ENCRYPT_MODE, publicKey)
+            return Base64.getEncoder().encodeToString(cipher.doFinal(aesKey))
+        } catch (e: Exception) { return null }
+    }
+
+    private fun parseTransportHeader(transport: String) {
+        transport.split(";").forEach { part ->
+            val p = part.trim()
+            if (p.startsWith("server_port=")) serverPort = p.substringAfter("=").toIntOrNull() ?: 0
+            if (p.startsWith("control_port=")) serverControlPort = p.substringAfter("=").toIntOrNull() ?: 0
+            if (p.startsWith("timing_port=")) serverTimingPort = p.substringAfter("=").toIntOrNull() ?: 0
+        }
+    }
+
+    private val supportedEncryptionTypes: Set<Int> =
+        RaopCapabilities.encryptionTypes(deviceFeatures).ifEmpty { setOf(0, 1) }
+    private val useFairPlayStub = RaopCapabilities.requiresUnsupportedFairPlay(deviceFeatures)
+    private var useEncryption = 1 in supportedEncryptionTypes
+
+    private fun buildSdp(localIp: String, rsaAesKey: String?, aesIvBase64: String?): String {
+        val base = "v=0\r\no=iTunes $localSessionId 0 IN IP4 $localIp\r\ns=iTunes\r\nc=IN IP4 $host\r\nt=0 0\r\nm=audio 0 RTP/AVP 96"
+        return if (useFairPlayStub) {
+            val dummyFpAesKey = buildDummyFpAesKey()
+            val dummyAesIv = Base64.getEncoder().encodeToString(aesIv ?: ByteArray(16))
+            logD("FairPlay et=5 receiver; announcing ALAC with dummy fpaeskey")
+            "$base\r\na=rtpmap:96 AppleLossless\r\na=fmtp:96 352 0 16 40 10 14 2 255 0 0 44100\r\na=fpaeskey:$dummyFpAesKey\r\na=aesiv:$dummyAesIv\r\n"
+        } else if (useEncryption) {
+            "$base\r\na=rtpmap:96 L16/44100/2\r\na=rsaaeskey:$rsaAesKey\r\na=aesiv:$aesIvBase64\r\n"
+        } else {
+            logD("No RSA support on receiver; announcing unencrypted L16")
+            "$base\r\na=rtpmap:96 L16/44100/2\r\n"
+        }
+    }
+
+    private fun buildDummyFpAesKey(): String {
+        val data = ByteArray(72)
+        Random.nextBytes(data)
+        data[0] = 0x46; data[1] = 0x50; data[2] = 0x4c; data[3] = 0x59
+        data[4] = 0x01; data[5] = 0x02; data[6] = 0x01; data[7] = 0x00
+        data[8] = 0x00; data[9] = 0x00; data[10] = 0x00; data[11] = 0x3c
+        data[12] = 0x00; data[13] = 0x00; data[14] = 0x00; data[15] = 0x00
+        return Base64.getEncoder().encodeToString(data)
+    }
+
+    private fun buildRtpPacket(data: ByteArray): ByteArray {
+        val h = ByteArray(12)
+        h[0] = 0x80.toByte(); h[1] = 0x60.toByte()
+        h[2] = (rtpSequence shr 8).toByte(); h[3] = rtpSequence.toByte()
+        h[4] = (rtpTimestamp shr 24).toByte(); h[5] = (rtpTimestamp shr 16).toByte()
+        h[6] = (rtpTimestamp shr 8).toByte(); h[7] = rtpTimestamp.toByte()
+        h[8] = (ssrc shr 24).toByte(); h[9] = (ssrc shr 16).toByte()
+        h[10] = (ssrc shr 8).toByte(); h[11] = ssrc.toByte()
+        return h + data
+    }
+
+    private fun swapEndianness(data: ByteArray): ByteArray {
+        val r = ByteArray(data.size)
+        for (i in 0 until data.size step 2) {
+            if (i + 1 < data.size) { r[i] = data[i + 1]; r[i + 1] = data[i] }
+        }
+        return r
+    }
+
     private fun encryptAudio(data: ByteArray): ByteArray {
         val key = aesKey ?: return data
         val iv = aesIv ?: return data
-        
-        try {
-            // Create a fresh cipher for each packet with the original IV
-            // AirPlay resets the IV for each packet (unlike standard CBC chaining)
+        return try {
             val cipher = Cipher.getInstance("AES/CBC/NoPadding")
-            val keySpec = SecretKeySpec(key, "AES")
-            val ivSpec = IvParameterSpec(iv)
-            cipher.init(Cipher.ENCRYPT_MODE, keySpec, ivSpec)
-            
-            // Only encrypt complete 16-byte blocks
-            val blockSize = 16
-            val numCompleteBlocks = data.size / blockSize
-            val encryptedSize = numCompleteBlocks * blockSize
-            val remainingBytes = data.size - encryptedSize
-            
-            if (encryptedSize == 0) {
-                // No complete blocks to encrypt, return data as-is
-                return data
-            }
-            
-            // Encrypt the complete blocks
-            val toEncrypt = data.copyOfRange(0, encryptedSize)
-            val encrypted = cipher.doFinal(toEncrypt)
-            
-            // Combine encrypted blocks with unencrypted remainder
-            return if (remainingBytes > 0) {
-                val remainder = data.copyOfRange(encryptedSize, data.size)
-                encrypted + remainder
-            } else {
-                encrypted
-            }
-        } catch (e: Exception) {
-            logE("Audio encryption failed: ${e.message}")
-            return data // Fall back to unencrypted on error
-        }
+            cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), IvParameterSpec(iv))
+            val b = 16; val n = data.size / b; val es = n * b
+            if (es == 0) return data
+            val enc = cipher.doFinal(data.copyOfRange(0, es))
+            if (data.size > es) enc + data.copyOfRange(es, data.size) else enc
+        } catch (e: Exception) { data }
     }
 
-    fun isConnected(): Boolean = isConnected.get()
-    fun isStreaming(): Boolean = isStreaming.get()
-    
-    // Logging helpers - log to both Android logcat and web LogServer
-    private fun logD(msg: String) {
-        Log.d(TAG, msg)
-        LogServer.d(TAG, msg)
+    private fun startTimingResponder() {
+        val socket = timingSocket ?: return
+        isTimingRunning.set(true)
+        Thread {
+            val buffer = ByteArray(128); val packet = DatagramPacket(buffer, buffer.size)
+            try {
+                while (isTimingRunning.get() && !socket.isClosed) {
+                    socket.receive(packet)
+                    if (packet.length >= 32) {
+                        val req = packet.data; val resp = ByteArray(packet.length)
+                        System.arraycopy(req, 0, resp, 0, 8)
+                        resp[1] = (0x53 or 0x80).toByte()
+                        System.arraycopy(req, 24, resp, 8, 8)
+                        val now = System.currentTimeMillis()
+                        val ntpSec = (now / 1000) + 2208988800L
+                        val ntpFrac = ((now % 1000) * 4294967296.0 / 1000.0).toLong()
+                        writeNtpTimestamp(resp, 16, ntpSec, ntpFrac)
+                        writeNtpTimestamp(resp, 24, ntpSec, ntpFrac)
+                        socket.send(DatagramPacket(resp, packet.length, packet.address, packet.port))
+                    }
+                }
+            } catch (e: Exception) {}
+        }.start()
     }
-    
-    private fun logE(msg: String) {
-        Log.e(TAG, msg)
-        LogServer.e(TAG, msg)
+
+    private fun writeNtpTimestamp(b: ByteArray, o: Int, s: Long, f: Long) {
+        b[o] = (s shr 24).toByte(); b[o+1] = (s shr 16).toByte(); b[o+2] = (s shr 8).toByte(); b[o+3] = s.toByte()
+        b[o+4] = (f shr 24).toByte(); b[o+5] = (f shr 16).toByte(); b[o+6] = (f shr 8).toByte(); b[o+7] = f.toByte()
     }
+
+    private fun startSyncSender() {
+        val socket = controlSocket ?: return
+        if (serverControlPort == 0) return
+        isSyncRunning.set(true)
+        val latencyMs = 2500L; val latencySamples = (latencyMs * SAMPLE_RATE / 1000)
+        val startRtp = rtpTimestamp; val startTime = System.currentTimeMillis()
+        Thread {
+            try {
+                val addr = InetAddress.getByName(host); var lastSync = 0L
+                while (isSyncRunning.get() && !socket.isClosed) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastSync >= 300) {
+                        val elapsedMs = now - startTime
+                        val curPlayRtp = startRtp + (elapsedMs * SAMPLE_RATE / 1000)
+                        val playTime = now + latencyMs
+                        val syncPacket = buildSyncPacket(curPlayRtp, playTime, latencySamples)
+                        socket.send(DatagramPacket(syncPacket, syncPacket.size, addr, serverControlPort))
+                        syncSequence++; lastSync = now
+                    }
+                    Thread.sleep(50)
+                }
+            } catch (e: Exception) {}
+        }.start()
+    }
+
+    private fun buildSyncPacket(rtp: Long, time: Long, lat: Long): ByteArray {
+        val p = ByteArray(20)
+        p[0] = if (syncSequence == 0) 0x90.toByte() else 0x80.toByte()
+        p[1] = 0xd4.toByte(); p[2] = (syncSequence shr 8).toByte(); p[3] = syncSequence.toByte()
+        p[4] = (rtp shr 24).toByte(); p[5] = (rtp shr 16).toByte(); p[6] = (rtp shr 8).toByte(); p[7] = rtp.toByte()
+        val s = (time / 1000) + 2208988800L; val f = ((time % 1000) * 4294967296.0 / 1000.0).toLong()
+        writeNtpTimestamp(p, 8, s, f)
+        val n = rtp + lat
+        p[16] = (n shr 24).toByte(); p[17] = (n shr 16).toByte(); p[18] = (n shr 8).toByte(); p[19] = n.toByte()
+        return p
+    }
+
+    private fun stopSyncSender() = isSyncRunning.set(false)
+    private fun stopTimingResponder() = isTimingRunning.set(false)
+
+    private fun startHealthMonitor() {
+        isHealthMonitorRunning.set(true)
+        Thread {
+            try {
+                while (isHealthMonitorRunning.get() && isConnected.get()) {
+                    Thread.sleep(HEALTH_CHECK_INTERVAL_MS)
+                    val s = rtspSocket
+                    if (s == null || s.isClosed || !s.isConnected) { handleServerDisconnect(); break }
+                    try {
+                        s.soTimeout = 100
+                        if (s.getInputStream().read() == -1) { handleServerDisconnect(); break }
+                    } catch (e: java.net.SocketTimeoutException) {
+                    } catch (e: Exception) { handleServerDisconnect(); break }
+                    finally { try { s.soTimeout = 10000 } catch (e: Exception) {} }
+                }
+            } catch (e: Exception) {}
+        }.start()
+    }
+
+    private fun stopHealthMonitor() = isHealthMonitorRunning.set(false)
+
+    private fun handleServerDisconnect() {
+        if (!isConnected.get()) return
+        isConnected.set(false); isStreaming.set(false)
+        stopHealthMonitor(); stopSyncSender(); stopTimingResponder()
+        try { rtspSocket?.close() } catch (e: Exception) {}
+        callback?.onDisconnected()
+    }
+
+    private fun logD(m: String) { Log.d(TAG, m); LogServer.d(TAG, m) }
+    private fun logE(m: String) { Log.e(TAG, m); LogServer.e(TAG, m) }
 }

@@ -9,6 +9,8 @@
     <string name="not_playing">not playing</string>
     <string name="streaming_notification_title">streaming to %s</string>
     <string name="streaming_notification_text">tap to open app</string>
+    <string name="fairplay_required_title">FairPlay required</string>
+    <string name="fairplay_required_message">%1$s requires Apple FairPlay audio encryption (et=5). centuryplay currently supports AirPlay 1 RSA receivers (et=1), so this device is not supported yet.</string>
     
     <!-- New strings for updated UI -->
     <string name="settings">settings</string>
