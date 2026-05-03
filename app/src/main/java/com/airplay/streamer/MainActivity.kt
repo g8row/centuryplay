@@ -436,8 +436,10 @@ class MainActivity : AppCompatActivity() {
             putExtra(AudioCaptureService.EXTRA_RESULT_CODE, resultCode)
             putExtra(AudioCaptureService.EXTRA_RESULT_DATA, data)
             putExtra(AudioCaptureService.EXTRA_HOST, device.host)
-            putExtra(AudioCaptureService.EXTRA_PORT, device.port)
+            putExtra(AudioCaptureService.EXTRA_PORT, device.raopPort ?: device.port)
             putExtra(AudioCaptureService.EXTRA_DEVICE_NAME, device.displayName)
+            putExtra(AudioCaptureService.EXTRA_DEVICE_FEATURES,
+                device.features.entries.joinToString(";") { "${it.key}=${it.value}" })
         }
         
         // Save Last Device for Auto-Connect

@@ -43,10 +43,29 @@
             android:exported="false"
             android:theme="@style/Theme.AirPlayStreamer"/>
 
+        <activity
+            android:name=".TileDeviceActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.AirPlayStreamer.Dialog" />
+
         <service
             android:name=".service.AudioCaptureService"
             android:foregroundServiceType="mediaProjection"
             android:exported="false" />
+
+        <!-- Quick Settings Tile -->
+        <service
+            android:name=".service.AirPlayTileService"
+            android:exported="true"
+            android:label="@string/tile_label"
+            android:icon="@drawable/ic_speaker"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
 
         <!-- NotificationListenerService for MediaSession access -->
         <service

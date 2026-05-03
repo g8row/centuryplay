@@ -54,6 +54,7 @@ class AudioCaptureService : Service() {
         const val EXTRA_HOST = "host"
         const val EXTRA_PORT = "port"
         const val EXTRA_DEVICE_NAME = "device_name"
+        const val EXTRA_DEVICE_FEATURES = "device_features"
 
         // Singleton for accessing streaming state
         var instance: AudioCaptureService? = null
@@ -96,9 +97,10 @@ class AudioCaptureService : Service() {
                 val host = intent.getStringExtra(EXTRA_HOST) ?: return START_NOT_STICKY
                 val port = intent.getIntExtra(EXTRA_PORT, 0)
                 deviceName = intent.getStringExtra(EXTRA_DEVICE_NAME) ?: "AirPlay Speaker"
+                val featuresJson = intent.getStringExtra(EXTRA_DEVICE_FEATURES) ?: ""
 
                 if (resultData != null) {
-                    startCapture(resultCode, resultData, host, port)
+                    startCapture(resultCode, resultData, host, port, featuresJson)
                 }
             }
             ACTION_STOP -> {
@@ -109,7 +111,7 @@ class AudioCaptureService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun startCapture(resultCode: Int, resultData: Intent, host: String, port: Int) {
+    private fun startCapture(resultCode: Int, resultData: Intent, host: String, port: Int, featuresJson: String) {
         if (isCapturing) return
 
         // Start foreground with notification
@@ -131,7 +133,12 @@ class AudioCaptureService : Service() {
 
                 // AirPlay 1 (RAOP) Path
                 LogServer.log("Starting AirPlay 1 (RAOP) connection to $host:$port")
-                raopClient = RaopClient(host, port)
+                val deviceFeatures = featuresJson.split(";")
+                    .mapNotNull { pair ->
+                        val parts = pair.split("=", limit = 2)
+                        if (parts.size == 2) parts[0] to parts[1] else null
+                    }.toMap()
+                raopClient = RaopClient(host, port, deviceFeatures)
                 
                 // Set callback to handle server disconnects
                 raopClient?.callback = object : RaopClient.StreamingCallback {

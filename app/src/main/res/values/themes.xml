@@ -64,4 +64,13 @@
         <item name="shapeAppearanceMediumComponent">@style/ShapeAppearance.AirPlay.MediumComponent</item>
         <item name="shapeAppearanceLargeComponent">@style/ShapeAppearance.AirPlay.LargeComponent</item>
     </style>
+
+    <style name="Theme.AirPlayStreamer.Dialog" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:backgroundDimEnabled">true</item>
+        <item name="android:windowAnimationStyle">@android:style/Animation.Dialog</item>
+    </style>
 </resources>

@@ -58,6 +58,30 @@ chmod +x gradlew   # first time only
 
 apk location: `app/build/outputs/apk/debug/app-debug.apk`
 
+### macos setup
+
+#### install prerequisites (homebrew)
+```bash
+# install homebrew if not already present
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# install java and android tools
+brew install openjdk@17 android-commandlinetools android-platform-tools
+```
+
+#### environment setup (zsh)
+add the following to your `~/.zshrc`:
+```bash
+export JAVA_HOME=$(/usr/libexec/java_home -v 17)
+export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
+export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
+```
+
+#### build command
+```bash
+./gradlew assembleDebug --no-daemon
+```
+
 ### windows setup
 
 #### prerequisites
@@ -85,6 +109,12 @@ adb uninstall com.airplay.streamer
 adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
+#### macos
+```bash
+# install debug apk
+adb install app/build/outputs/apk/debug/app-debug.apk
+```
+
 #### windows (powershell)
 ```powershell
 # uninstall
@@ -96,7 +126,7 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 
 ### logging
 
-#### linux
+#### linux / macos
 ```bash
 # adb logcat (last 2000 lines)
 adb logcat -d -t 2000
