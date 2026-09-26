@@ -1,99 +1,88 @@
 package com.airplay.streamer.ui
 
 import android.app.Application
-import android.content.Context
-import android.net.wifi.WifiManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.airplay.streamer.discovery.AirPlayDevice
-import com.airplay.streamer.discovery.AirPlayDiscovery
-import com.airplay.streamer.discovery.DiscoveryEvent
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import com.airplay.streamer.discovery.DiscoveryRepository
+import com.airplay.streamer.engine.SessionState
+import com.airplay.streamer.engine.SinkFactory
+import com.airplay.streamer.engine.SpeakerStatus
+import com.airplay.streamer.engine.Transport
+import com.airplay.streamer.service.AudioCaptureService
+import com.airplay.streamer.service.MediaInfoTracker
+import com.airplay.streamer.util.Prefs
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 
 data class MainUiState(
-    val devices: List<AirPlayDevice> = emptyList(),
-    val selectedDevice: AirPlayDevice? = null,
-    val isStreaming: Boolean = false,
-    val statusMessage: String = "searching for airplay speakers..."
+    val rows: List<SpeakerRow> = emptyList(),
+    val session: SessionState = SessionState(),
+    val searching: Boolean = true,
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val _uiState = MutableStateFlow(MainUiState())
-    val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
+    private val repository = DiscoveryRepository.getInstance(application)
+    private val prefs = Prefs(application)
+    private val manualDevices = MutableStateFlow<List<AirPlayDevice>>(emptyList())
 
-    private val repository = com.airplay.streamer.discovery.DiscoveryRepository.getInstance(application)
+    private val tracker = MediaInfoTracker(application)
+    val mediaInfo: StateFlow<MediaInfoTracker.MediaInfo> = tracker.mediaInfo
 
-    private val mediaInfoTracker = com.airplay.streamer.service.MediaInfoTracker(application)
-    val mediaInfo = mediaInfoTracker.mediaInfo
+    val uiState: StateFlow<MainUiState> = combine(
+        repository.devices, manualDevices, AudioCaptureService.state
+    ) { discovered, manual, session ->
+        val all = (discovered + manual.filter { m -> discovered.none { it.identity == m.identity } })
+        val rows = all.map { d ->
+            SpeakerRow(d, session.speaker(d.identity), SinkFactory.transportFor(d, prefs.preferAirPlay2))
+        }.sortedWith(
+            compareByDescending<SpeakerRow> { it.active }
+                .thenByDescending { it.supported }
+                .thenBy { it.device.displayName.lowercase() }
+        )
+        MainUiState(rows = rows, session = session, searching = all.isEmpty())
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, MainUiState())
 
     init {
-        val startTime = System.currentTimeMillis()
-        android.util.Log.d("PROFILING", "MainViewModel init started")
         repository.startDiscovery()
-        mediaInfoTracker.start()
-        
-        viewModelScope.launch {
-            repository.devices.collect { devices ->
-                // Show devices that support RAOP (AirPlay 1).
-                val filtered = devices.filter { it.protocolVersion == 1 || it.raopPort != null }
-                
-                val message = if (filtered.isEmpty()) {
-                    "searching for airplay speakers..."
-                } else {
-                    if (filtered.size == 1) "found 1 speaker" else "found ${filtered.size} speakers"
-                }
-                
-                _uiState.value = _uiState.value.copy(
-                    devices = filtered,
-                    statusMessage = message
-                )
-            }
-        }
-        android.util.Log.d("PROFILING", "MainViewModel init finished in ${System.currentTimeMillis() - startTime}ms")
+        tracker.start()
     }
 
-    fun selectDevice(device: AirPlayDevice) {
-        val current = _uiState.value.selectedDevice
-        if (current?.host == device.host && current.port == device.port) {
-            // Deselect
-            _uiState.value = _uiState.value.copy(selectedDevice = null)
-        } else {
-            _uiState.value = _uiState.value.copy(selectedDevice = device)
-        }
-    }
+    fun refreshTracker() = tracker.tryRegister()
+
+    fun onForeground() = repository.ensureFresh()
 
     fun addManualDevice(device: AirPlayDevice) {
-        // Since the repository is global, we can't easily add a manual device just for one session
-        // without it affecting everything, but we can just update the UI state locally if needed.
-        val current = _uiState.value.devices.toMutableList()
-        if (current.none { it.host == device.host && it.port == device.port }) {
-            current.add(device)
-            _uiState.value = _uiState.value.copy(devices = current)
-        }
+        manualDevices.value = manualDevices.value.filterNot { it.identity == device.identity } + device
     }
 
-    fun refreshDiscovery() {
-        repository.refresh()
+    fun refreshDiscovery() = repository.refresh()
+
+    /** Track progress 0..1, or null when the duration is unknown. */
+    fun trackProgress(): Float? {
+        val duration = tracker.mediaInfo.value.duration
+        if (duration <= 0) return null
+        return (tracker.currentPosition().toFloat() / duration).coerceIn(0f, 1f)
     }
 
-    fun setStreamingState(isStreaming: Boolean) {
-        _uiState.value = _uiState.value.copy(isStreaming = isStreaming)
-    }
+    fun togglePlayback() = tracker.togglePlayback()
+    fun next() = tracker.next()
+    fun previous() = tracker.previous()
 
-    fun togglePlayback() {
-        mediaInfoTracker.togglePlayback()
-    }
+    fun playingNames(): String = uiState.value.session.speakers
+        .filter { it.status == SpeakerStatus.PLAYING }.joinToString(" + ") { it.name.lowercase() }
 
     override fun onCleared() {
-        super.onCleared()
         repository.stopDiscovery()
-        mediaInfoTracker.stop()
+        tracker.stop()
+        super.onCleared()
+    }
+
+    companion object {
+        fun isSupported(transport: Transport) = transport != Transport.UNSUPPORTED
     }
 }

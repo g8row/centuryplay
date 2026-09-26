@@ -1,9 +1,32 @@
 # airplay 2 protocol & implementation guide
 
-> **status**: research & implementation draft
-> **last updated**: may 2026
+> **status**: implemented (single-device, transient HAP, raw PCM, NTP timing)
+> **last updated**: june 2026
 
-this document covers the airplay 2 protocol, focusing on the technical requirements for an android implementation, including the shizuku workaround for ptp synchronization.
+this document covers the airplay 2 protocol and its android implementation.
+
+## implemented path (june 2026)
+
+The app now streams to AirPlay 2 receivers (Sonos, HomePod, Apple TV, ...) over a
+**single-device, no-root** path that deliberately sidesteps FairPlay/MFi:
+
+- **Transient HAP pairing (PIN 3939):** session keys come from an SRP-6a exchange,
+  not FairPlay or MFi. This is why Sonos (feature bit 48,
+  `SupportsCoreUtilsPairingAndEncryption`) and HomePod work with no Apple secrets.
+- **NTP timing on a high UDP port** — no PTP, no privileged ports 319/320, no Shizuku.
+- **Raw PCM** audio (`audioFormat 0x800`, `ct=1`, realtime `type=0x60`), ChaCha20-Poly1305
+  encrypted, 8-byte nonce suffix per packet.
+- Routing: a device advertising AirPlay 2 + transient (`ft` bits 38/48) goes through
+  `AirPlay2Client`; classic `et=0/1` RAOP devices still use `RaopClient`; RAOP-only
+  `et=5` (FairPlay-only, no AirPlay 2) remains unsupported.
+
+Code: `app/src/main/java/com/airplay/streamer/airplay2/` — `AirPlay2Client` (orchestration),
+`HapTransientPairing` + `Srp6a` + `Hkdf` (pairing/keys), `HapSession` + `Chacha20Poly1305`
+(encryption), `AirPlay2Connection` (HTTP/RTSP transport), `BinaryPlist` (bplist bodies),
+`NtpTimingServer`, `AirPlay2EventChannel`, `AirPlay2Capabilities` (ft parsing). Mirrors
+pyatv `protocols/raop/protocols/airplayv2.py` + `protocols/airplay/auth/*` + `auth/*`.
+
+The PTP / Shizuku multi-room approach below remains future work, not the current path.
 
 ## table of contents
 

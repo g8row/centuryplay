@@ -4,11 +4,16 @@
 
 centuryplay is an Android/Kotlin app that captures Android playback audio with `MediaProjection` and streams it to AirPlay/RAOP receivers.
 
-Main areas:
-- `app/src/main/java/com/airplay/streamer/discovery`: mDNS discovery and device capability TXT parsing.
-- `app/src/main/java/com/airplay/streamer/service/AudioCaptureService.kt`: foreground capture service and RAOP lifecycle.
-- `app/src/main/java/com/airplay/streamer/raop/RaopClient.kt`: RTSP/RAOP session setup, UDP timing/sync/audio, encryption experiments.
-- `docs/`: protocol notes and current reverse-engineering findings.
+Main areas (v2 engine, see `docs/RESEARCH_AND_ROADMAP.md` for design + verified findings):
+- `discovery/`: mDNS discovery and device capability TXT parsing.
+- `engine/`: `StreamEngine` (capture thread, `CaptureTimeline`), `StreamSession` (multi-room, reconnect), `SinkFactory` (RAOP vs AirPlay 2 routing).
+- `raop/RaopSink.kt` + `RtspConnection.kt`: AirPlay 1 (ALAC/L16, sync, resends, metadata, Digest auth).
+- `airplay2/AirPlay2Sink.kt`: AirPlay 2 realtime via transient HAP pairing + NTP (mirror pyatv).
+- `audio/AlacEncoder.kt` + `app/src/main/cpp/`: Apple's ALAC encoder via JNI (note the ARM endianness patch in `EndianPortable.c`).
+- `service/`: `AudioCaptureService` (FGS, capture source, OS integration), `StreamController` (entry point), `StreamMediaSession` (remote volume), tile.
+- `shizuku/`: optional privileged helper (one-tap permission grants, AudioPolicy reroute capture).
+- `router/`: MediaRoute2 provider (output switcher, and the routing session that lets volume keys reach our session).
+- `docs/`: protocol notes, research and roadmap.
 - `tools/collect_macos_airplay_logs.sh`: helper for collecting macOS AirPlay logs while capturing a reproduction.
 
 ## Build and test
@@ -31,7 +36,15 @@ Useful live logs:
 adb logcat | rg 'RaopClient|AudioCaptureService|LogServer|centuryplay'
 ```
 
-The app also starts a lightweight log server on the Android device at `http://<device-ip>:8080`.
+Debug builds (or Settings → debug log server) serve logs at `http://<device-ip>:8080` (`/text` for plain text); use `adb forward tcp:8080 tcp:8080`.
+
+AirPlay 2 test receiver (no prompts, supports transient + PIN 3939 pairing, ALAC): clone
+openairplay/airplay2-receiver, `pip install netifaces zeroconf==0.38.3 biplist pycryptodome hexdump srptools hkdf cryptography requests av`,
+change its port 7000 → 7010 (macOS ControlCenter owns 7000), stub `pyaudio` with a module whose stream `write()` appends
+to a file, and patch two receiver bugs for current PyAV (`codecContext.channels` is read-only → set `layout`;
+`bytes(frame.planes[0])` includes alignment padding → slice to `frame.samples * channels * 2`). Then analyse the PCM file.
+
+Testing: never play audible test tones through real speakers at night; use shairport-sync capture instances (`-o stdout > file`) and quiet tones, and stop the player after tests (a stopped/failed reroute sends audio back to the phone speaker).
 
 ## Current receiver support
 

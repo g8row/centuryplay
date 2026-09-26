@@ -1,7 +1,9 @@
 package com.airplay.streamer.discovery
 
 import android.net.wifi.WifiManager
+import android.os.Parcelable
 import android.util.Log
+import kotlinx.parcelize.Parcelize
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -15,6 +17,7 @@ import javax.jmdns.ServiceListener
 /**
  * Represents a discovered AirPlay speaker
  */
+@Parcelize
 data class AirPlayDevice(
     val name: String,
     val host: String,
@@ -23,8 +26,11 @@ data class AirPlayDevice(
     val publicKey: String? = null, // 'pk'
     val features: Map<String, String> = emptyMap(),
     val protocolVersion: Int = 2, // 1 = RAOP (AirPlay 1), 2 = AirPlay 2
-    val raopPort: Int? = null // Port for RAOP protocol if discovered via _raop._tcp
-) {
+    val raopPort: Int? = null, // Port for RAOP protocol if discovered via _raop._tcp
+    // Stable key shared by a device's _raop and _airplay records: the MAC in the RAOP
+    // service name ("37562C433AF0@Name") or the AirPlay "deviceid" TXT, else the host.
+    val identity: String = host
+) : Parcelable {
     val displayName: String
         get() = name.substringAfter("@").ifEmpty { name }
     
@@ -90,24 +96,30 @@ class AirPlayDiscovery(
             }
 
             override fun serviceRemoved(event: ServiceEvent) {
-                val device = parseServiceEvent(event, isRaop = false)
-                if (device != null) {
-                    discoveredDevices.remove(device.host)
-                    trySend(DiscoveryEvent.DeviceLost(device))
+                // Removal events usually carry no address/TXT, so match on service name.
+                val device = synchronized(discoveredDevices) {
+                    discoveredDevices.values.firstOrNull { it.name == event.name && it.protocolVersion == 2 }
+                        ?.also { discoveredDevices.remove(it.identity) }
                 }
+                if (device != null) trySend(DiscoveryEvent.DeviceLost(device))
             }
 
             override fun serviceResolved(event: ServiceEvent) {
                 val device = parseServiceEvent(event, isRaop = false)
-                if (device != null) {
-                    val existingDevice = discoveredDevices[device.host]
+                if (device != null) synchronized(discoveredDevices) {
+                    val existingDevice = findCounterpart(device)
                     val mergedDevice = if (existingDevice != null) {
-                        // Merge: keep RAOP port if already discovered
-                        device.copy(raopPort = existingDevice.raopPort)
+                        // Merge: keep RAOP port, and union features so RAOP's et/cn and
+                        // AirPlay 2's ft flags both survive (ft is needed for v2 routing).
+                        device.copy(
+                            raopPort = existingDevice.raopPort,
+                            features = existingDevice.features + device.features,
+                            identity = existingDevice.identity
+                        )
                     } else {
                         device
                     }
-                    discoveredDevices[device.host] = mergedDevice
+                    discoveredDevices[mergedDevice.identity] = mergedDevice
                     trySend(DiscoveryEvent.DeviceFound(mergedDevice))
                     Log.d(TAG, "AirPlay 2 device found: ${device.displayName} at ${device.host}:${device.port}")
                 }
@@ -121,33 +133,31 @@ class AirPlayDiscovery(
             }
 
             override fun serviceRemoved(event: ServiceEvent) {
-                val device = parseServiceEvent(event, isRaop = true)
-                if (device != null) {
-                    // Only remove if not also an AirPlay 2 device
-                    val existing = discoveredDevices[device.host]
-                    if (existing?.protocolVersion == 1) {
-                        discoveredDevices.remove(device.host)
-                        trySend(DiscoveryEvent.DeviceLost(device))
-                    }
+                // Only remove if not also an AirPlay 2 device
+                val device = synchronized(discoveredDevices) {
+                    discoveredDevices.values.firstOrNull { it.name == event.name && it.protocolVersion == 1 }
+                        ?.also { discoveredDevices.remove(it.identity) }
                 }
+                if (device != null) trySend(DiscoveryEvent.DeviceLost(device))
             }
 
             override fun serviceResolved(event: ServiceEvent) {
                 val device = parseServiceEvent(event, isRaop = true)
-                if (device != null) {
-                    val existingDevice = discoveredDevices[device.host]
+                if (device != null) synchronized(discoveredDevices) {
+                    val existingDevice = findCounterpart(device)
                     if (existingDevice != null) {
-                        // Merge: keep AirPlay 2 identity but use RAOP port and RAOP TXT features
-                        // (RAOP TXT record contains et=, cn= etc. needed for AirPlay 1 connection)
+                        // Merge: keep AirPlay 2 identity and RAOP port. Union features so the
+                        // RAOP TXT (et=, cn= for AirPlay 1) and the AirPlay 2 TXT (ft flags for
+                        // v2 routing) are both present.
                         val mergedDevice = existingDevice.copy(
                             raopPort = device.port,
-                            features = device.features
+                            features = existingDevice.features + device.features
                         )
-                        discoveredDevices[device.host] = mergedDevice
+                        discoveredDevices[mergedDevice.identity] = mergedDevice
                         trySend(DiscoveryEvent.DeviceFound(mergedDevice))
                     } else {
                         // New RAOP-only device (AirPlay 1)
-                        discoveredDevices[device.host] = device
+                        discoveredDevices[device.identity] = device
                         trySend(DiscoveryEvent.DeviceFound(device))
                     }
                     Log.d(TAG, "RAOP device found: ${device.displayName} at ${device.host}:${device.port}")
@@ -211,7 +221,14 @@ class AirPlayDiscovery(
         // Public Key 'pk' is needed for AirPlay 2 auth
         val publicKey = features["pk"]
 
+        val identity = if (isRaop) {
+            name.substringBefore("@", missingDelimiterValue = "").ifEmpty { null }
+        } else {
+            features["deviceid"]?.replace(":", "")
+        }?.uppercase() ?: host
+
         return AirPlayDevice(
+            identity = identity,
             name = name,
             host = host,
             port = port,
@@ -221,6 +238,22 @@ class AirPlayDiscovery(
             protocolVersion = if (isRaop) 1 else 2,
             raopPort = if (isRaop) port else null
         )
+    }
+
+    /**
+     * The already-known record for the same physical device, if any: same identity, or
+     * (when one of the records exposes no ID) the single other-protocol record on the
+     * same host. Two records with different real IDs are different receivers even on one
+     * host (e.g. macOS's own receiver next to a shairport-sync instance).
+     */
+    private fun findCounterpart(device: AirPlayDevice): AirPlayDevice? {
+        discoveredDevices[device.identity]?.let { return it }
+        return discoveredDevices.values
+            .filter {
+                it.host == device.host && it.protocolVersion != device.protocolVersion &&
+                    (it.identity == it.host || device.identity == device.host)
+            }
+            .singleOrNull()
     }
 
     fun stop() {

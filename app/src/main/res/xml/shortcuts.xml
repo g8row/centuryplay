@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_speaker"
+        android:shortcutId="stop"
+        android:shortcutLongLabel="@string/shortcut_stop"
+        android:shortcutShortLabel="@string/shortcut_stop">
+        <intent
+            android:action="com.airplay.streamer.shortcut.STOP"
+            android:targetClass="com.airplay.streamer.ShortcutActivity"
+            android:targetPackage="com.airplay.streamer" />
+    </shortcut>
+</shortcuts>

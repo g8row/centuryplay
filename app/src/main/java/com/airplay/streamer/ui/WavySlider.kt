@@ -96,7 +96,18 @@ class WavySlider @JvmOverloads constructor(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        startWaveAnimation()
+        if (isShown) startWaveAnimation()
+    }
+
+    // Only animate while actually visible: an infinite animator on a hidden view burns CPU
+    // (and battery) redrawing nothing.
+    override fun onVisibilityAggregated(isVisible: Boolean) {
+        super.onVisibilityAggregated(isVisible)
+        if (isVisible) {
+            if (waveAnimator?.isRunning != true) startWaveAnimation()
+        } else {
+            waveAnimator?.cancel()
+        }
     }
 
     override fun onDetachedFromWindow() {

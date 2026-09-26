@@ -1,41 +1,109 @@
 <resources>
     <string name="app_name">centuryplay</string>
     <string name="no_speakers_found">searching for speakers…</string>
-    <string name="searching_speakers">searching for speakers…</string>
+    <string name="searching_speakers">looking for airplay speakers…</string>
+    <string name="searching_hint">make sure your phone and speakers are on the same wi-fi</string>
     <string name="start_streaming">stream</string>
-    <string name="stop_streaming">disconnect</string>
-    <string name="connect">connect</string>
-    <string name="disconnect">disconnect</string>
-    <string name="not_playing">not playing</string>
-    <string name="streaming_notification_title">streaming to %s</string>
-    <string name="streaming_notification_text">tap to open app</string>
-    <string name="fairplay_required_title">FairPlay required</string>
-    <string name="fairplay_required_message">%1$s requires Apple FairPlay audio encryption (et=5). centuryplay currently supports AirPlay 1 RSA receivers (et=1), so this device is not supported yet.</string>
-    
-    <!-- New strings for updated UI -->
+    <string name="stop_streaming">stop</string>
+    <string name="streaming_notification_title">playing on %s</string>
+    <string name="streaming_notification_text">streaming your phone\'s audio</string>
+    <string name="standby_title">airplay ready</string>
+    <string name="standby_text">tap a speaker to stream instantly</string>
+    <string name="release">release</string>
+    <string name="volume_up">volume up</string>
+    <string name="volume_down">volume down</string>
+    <string name="connecting">connecting…</string>
+    <string name="no_speakers">no speakers</string>
+    <string name="n_speakers">%d speakers</string>
+    <string name="channel_streaming">streaming</string>
+    <string name="channel_streaming_desc">shown while audio is streamed to speakers</string>
+    <string name="channel_alerts">alerts</string>
+    <string name="alert_capture_stopped">streaming stopped: audio capture permission was revoked</string>
+    <string name="alert_need_consent">open centuryplay to allow audio capture</string>
+    <string name="alert_auto_stopped">streaming stopped after %d minutes of silence</string>
+    <string name="alert_capture_blocked">%1$s doesn\'t allow other apps to capture its audio. set up shizuku in centuryplay to stream it anyway.</string>
+    <string name="alert_capture_blocked_hard">%1$s blocks audio capture completely (drm), so it can\'t be streamed.</string>
+    <string name="sleep_timer_notification">stops at %s (sleep timer)</string>
+    <string name="sleep_timer">sleep timer</string>
+    <string name="sleep_timer_off">off</string>
+    <string name="sleep_timer_set">stops at %s</string>
+    <string name="shortcut_stop">stop airplay</string>
+    <string name="shortcut_play_on">play on %s</string>
+    <string name="shortcut_not_found">speaker not found on this network</string>
+    <string name="widget_description">one tap to play on your airplay speakers</string>
+    <string name="widget_tap_to_play">tap ▶ to play on your speakers</string>
+    <string name="widget_open_app">open to pick a speaker</string>
+    <string name="audio_delay_label">audio delay: %s ms (sync this speaker with others or with video)</string>
+    <string name="alert_speakers_lost">streaming stopped: the speakers can\'t be reached (left the wi-fi?). playback was paused.</string>
+    <string name="speakers_action">speakers</string>
+    <string name="lossless">lossless</string>
+    <string name="speaker_status_pin">code needed · tap to enter</string>
+    <string name="pin_title">pair with %s</string>
+    <string name="pin_message">enter the code shown on the tv/speaker, or the airplay password you set on it. you only need to do this once.</string>
+    <string name="pin_hint">code or password</string>
+    <string name="pair_with_code">pair with code</string>
+    <string name="forget_pairing">forget pairing</string>
+    <string name="capture_permission_denied">audio capture wasn\'t allowed</string>
+    <string name="permission_required">centuryplay needs audio capture permission to stream</string>
+    <string name="route_description">airplay · centuryplay</string>
+    <string name="route_this_phone">This phone</string>
+    <string name="route_this_phone_desc">stop airplay streaming</string>
+    <string name="consent_notification_title">stream to %s</string>
+    <string name="consent_notification_text">tap to allow audio capture (once)</string>
+    <string name="fairplay_required_title">not supported</string>
+    <string name="fairplay_required_message">%1$s only accepts FairPlay-encrypted audio, which third-party apps can\'t produce.</string>
+
+    <!-- main screen -->
     <string name="settings">settings</string>
     <string name="volume">volume</string>
-    <string name="available_speakers">available speakers</string>
     <string name="refresh_speakers">refresh speaker list</string>
-    <string name="protocol_v1">airplay v1</string>
-    <string name="protocol_v2">airplay v2</string>
-    <string name="protocol_auto">auto (detect)</string>
+    <string name="status_searching">looking for speakers…</string>
+    <string name="status_found">%d speakers nearby</string>
+    <string name="status_found_one">1 speaker nearby</string>
+    <string name="status_playing_on">playing on %s</string>
+    <string name="speaker_status_connecting">connecting…</string>
+    <string name="speaker_status_reconnecting">reconnecting…</string>
+    <string name="speaker_status_playing">playing</string>
+    <string name="speaker_status_password">password required · tap to enter</string>
+    <string name="speaker_status_accept">accept the request on the speaker, then tap again</string>
+    <string name="speaker_unsupported">needs fairplay · not supported</string>
+    <string name="group_volume">all speakers</string>
+    <string name="waiting_for_music">waiting for music…</string>
+    <string name="play_something">play something in any app</string>
+    <string name="unknown_artist">unknown artist</string>
+    <string name="password_title">password for %s</string>
+    <string name="password_hint">speaker password</string>
+    <string name="ok">ok</string>
+    <string name="cancel">cancel</string>
+    <string name="forget_password">forget password</string>
+
+    <!-- setup card -->
+    <string name="setup_permissions_title">allow audio capture</string>
+    <string name="setup_permissions_text">centuryplay streams whatever your phone is playing. android needs your ok first.</string>
+    <string name="setup_permissions_button">allow</string>
+    <string name="setup_shizuku_title">one-tap setup with shizuku</string>
+    <string name="setup_shizuku_text">skip every permission prompt, keep the phone silent while streaming and show track info on speakers.</string>
+    <string name="setup_shizuku_button">set up</string>
+    <string name="setup_shizuku_perm_title">connect shizuku</string>
+    <string name="setup_shizuku_perm_text">shizuku is running. allow centuryplay to use it to skip permission prompts.</string>
+    <string name="setup_shizuku_perm_button">connect</string>
+    <string name="setup_listener_title">show what\'s playing</string>
+    <string name="setup_listener_text">allow notification access so speakers can show the song, artist and artwork.</string>
+    <string name="setup_listener_button">allow</string>
+    <string name="setup_tip_title">tired of the capture prompt?</string>
+    <string name="setup_tip_text">with the free shizuku app, centuryplay never asks again, keeps the phone speaker silent and can start streaming by itself when music plays. (settings has a one-line adb alternative.)</string>
+    <string name="setup_tip_button">get shizuku</string>
+    <string name="setup_done">setup complete</string>
+    <string name="dismiss">dismiss</string>
+
+    <!-- settings (legacy ids kept) -->
     <string name="settings_title">settings</string>
-    <string name="protocol_preference">protocol preference</string>
-    <string name="protocol_preference_summary">choose which airplay version to use</string>
-    
-    <!-- Debug mode -->
-    <string name="debug_mode">debug mode</string>
-    <string name="debug_mode_summary">enable advanced options</string>
-    <string name="manual_connect">manual connect</string>
     <string name="manual_connect_title">manual connection</string>
     <string name="manual_connect_hint">ip:port (e.g. 192.168.1.100:5000)</string>
-    <string name="manual_connect_description">connect to a device not discovered via mdns</string>
     <string name="save_manual_device">save device</string>
-    
+
     <!-- Quick Settings Tile -->
-    <string name="tile_label">centuryplay</string>
-    <string name="tile_connected">streaming to %s</string>
+    <string name="tile_label">airplay</string>
     <string name="tile_disconnected">tap to stream</string>
-    <string name="select_speaker">select speaker</string>
+    <string name="select_speaker">play on</string>
 </resources>

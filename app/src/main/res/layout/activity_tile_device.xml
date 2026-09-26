@@ -60,13 +60,16 @@
                 android:textColor="?attr/colorOnSurfaceVariant"
                 android:visibility="gone"/>
 
-            <View
-                android:layout_width="40dp"
-                android:layout_height="4dp"
-                android:layout_gravity="center_horizontal"
-                android:layout_marginTop="12dp"
-                android:background="?attr/colorOutlineVariant"
-                android:backgroundTint="?attr/colorOutlineVariant" />
+            <Button
+                android:id="@+id/stopAllButton"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="end"
+                android:layout_marginTop="8dp"
+                android:text="@string/stop_streaming"
+                android:visibility="gone"
+                app:icon="@drawable/ic_stop" />
 
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>

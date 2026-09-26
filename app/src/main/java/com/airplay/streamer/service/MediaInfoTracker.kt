@@ -9,23 +9,22 @@ import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.service.notification.NotificationListenerService
 import com.airplay.streamer.util.LogServer
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * Tracks currently playing media across all apps.
- * Uses MediaSessionManager to get active media sessions and extract metadata.
- * 
- * Requires NOTIFICATION_LISTENER permission to access MediaSessionManager.
+ * Tracks what other apps are playing (title/artist/art/position) via MediaSessionManager.
+ * Needs notification-listener access (the [NotificationListener] component); without it
+ * nothing is reported. Our own media session is always ignored.
  */
 class MediaInfoTracker(private val context: Context) {
-
-    companion object {
-        private const val TAG = "MediaInfoTracker"
-    }
 
     data class MediaInfo(
         val title: String? = null,
@@ -35,176 +34,169 @@ class MediaInfoTracker(private val context: Context) {
         val duration: Long = 0,
         val position: Long = 0,
         val isPlaying: Boolean = false,
-        val packageName: String? = null
+        val packageName: String? = null,
     ) {
-        val hasContent: Boolean
-            get() = title != null || artist != null
-            
-        fun displayText(): String {
-            return when {
-                title != null && artist != null -> "$title • $artist"
-                title != null -> title
-                artist != null -> artist
-                else -> "Unknown"
-            }
+        val hasContent: Boolean get() = title != null || artist != null
+
+        fun displayText(): String = when {
+            title != null && artist != null -> "$title • $artist"
+            title != null -> title
+            artist != null -> artist
+            else -> "Unknown"
         }
     }
 
     private val _mediaInfo = MutableStateFlow(MediaInfo())
     val mediaInfo: StateFlow<MediaInfo> = _mediaInfo.asStateFlow()
 
-    private var mediaSessionManager: MediaSessionManager? = null
-    private var activeController: MediaController? = null
+    private val _playbackStarted = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    /** Emits the package name whenever another app's session starts playing. */
+    val playbackStarted: SharedFlow<String> = _playbackStarted.asSharedFlow()
+
+    private var manager: MediaSessionManager? = null
     private val handler = Handler(Looper.getMainLooper())
+    private val controllers = mutableListOf<MediaController>()
+    private val callbacks = mutableMapOf<MediaController, MediaController.Callback>()
+    private val lastStates = mutableMapOf<String, Int>()
+    var activeController: MediaController? = null
+        private set
+    private var started = false
 
-    private val sessionListener = MediaSessionManager.OnActiveSessionsChangedListener { controllers ->
-        LogServer.log("$TAG: Active sessions changed, count=${controllers?.size ?: 0}")
-        updateActiveController(controllers)
+    private val sessionListener = MediaSessionManager.OnActiveSessionsChangedListener { list ->
+        setControllers(list.orEmpty())
     }
 
-    private val controllerCallback = object : MediaController.Callback() {
-        override fun onMetadataChanged(metadata: MediaMetadata?) {
-            LogServer.log("$TAG: Metadata changed")
-            updateMediaInfo(metadata, activeController?.playbackState)
-        }
+    val hasAccess: Boolean get() = hasNotificationAccess(context)
 
-        override fun onPlaybackStateChanged(state: PlaybackState?) {
-            LogServer.log("$TAG: Playback state changed: ${state?.state}")
-            updateMediaInfo(activeController?.metadata, state)
-        }
-
-        override fun onSessionDestroyed() {
-            LogServer.log("$TAG: Session destroyed")
-            _mediaInfo.value = MediaInfo()
-        }
-    }
-
-    /**
-     * Start tracking media sessions.
-     * Note: Requires NotificationListenerService permission.
-     */
     fun start() {
+        if (started) return
+        started = true
+        val m = context.getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
+        manager = m
+        tryRegister()
+    }
+
+    /** Retry registration (e.g. after the user granted notification access). */
+    fun tryRegister() {
+        val m = manager ?: return
         try {
-            mediaSessionManager = context.getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
-            
-            // Get component name for our notification listener (if we have one)
-            // For now, try without it - some devices allow this
-            val componentName = ComponentName(context, NotificationListener::class.java)
-            
-            try {
-                mediaSessionManager?.addOnActiveSessionsChangedListener(sessionListener, componentName)
-                
-                // Get initial active sessions
-                val controllers = mediaSessionManager?.getActiveSessions(componentName)
-                updateActiveController(controllers)
-                
-                LogServer.log("$TAG: Started tracking media sessions")
-            } catch (e: SecurityException) {
-                // Try without component name (may work on some devices)
-                LogServer.log("$TAG: NotificationListener not enabled, trying fallback")
-                tryFallbackTracking()
-            }
+            val component = ComponentName(context, NotificationListener::class.java)
+            m.removeOnActiveSessionsChangedListener(sessionListener)
+            m.addOnActiveSessionsChangedListener(sessionListener, component, handler)
+            setControllers(m.getActiveSessions(component))
+        } catch (e: SecurityException) {
+            LogServer.log("MediaInfoTracker: no notification access; track info unavailable")
         } catch (e: Exception) {
-            LogServer.log("$TAG: Failed to start: ${e.message}")
-        }
-    }
-
-    /**
-     * Fallback tracking using AudioManager (limited info)
-     */
-    private fun tryFallbackTracking() {
-        // Poll periodically for any active sessions
-        // This is less reliable but works without special permissions
-        handler.postDelayed(object : Runnable {
-            override fun run() {
-                try {
-                    val controllers = mediaSessionManager?.getActiveSessions(null)
-                    if (!controllers.isNullOrEmpty()) {
-                        updateActiveController(controllers)
-                    }
-                } catch (e: Exception) {
-                    // Ignore - we don't have permission
-                }
-                handler.postDelayed(this, 2000)
-            }
-        }, 1000)
-    }
-
-    fun togglePlayback() {
-        activeController?.let { controller ->
-            val state = controller.playbackState?.state
-            if (state == PlaybackState.STATE_PLAYING) {
-                controller.transportControls.pause()
-            } else {
-                controller.transportControls.play()
-            }
+            LogServer.log("MediaInfoTracker: ${e.message}")
         }
     }
 
     fun stop() {
-        try {
-            mediaSessionManager?.removeOnActiveSessionsChangedListener(sessionListener)
-            activeController?.unregisterCallback(controllerCallback)
-            activeController = null
-            handler.removeCallbacksAndMessages(null)
-        } catch (e: Exception) {
-            LogServer.log("$TAG: Error stopping: ${e.message}")
-        }
+        started = false
+        runCatching { manager?.removeOnActiveSessionsChangedListener(sessionListener) }
+        setControllers(emptyList())
+        handler.removeCallbacksAndMessages(null)
     }
 
-    private fun updateActiveController(controllers: List<MediaController>?) {
-        if (controllers.isNullOrEmpty()) {
-            activeController?.unregisterCallback(controllerCallback)
-            activeController = null
-            _mediaInfo.value = MediaInfo()
-            return
-        }
+    private fun setControllers(list: List<MediaController>) {
+        val filtered = list.filter { it.packageName != context.packageName }
+        for (c in controllers) callbacks.remove(c)?.let { runCatching { c.unregisterCallback(it) } }
+        controllers.clear()
+        controllers.addAll(filtered)
+        for (c in filtered) {
+            val cb = object : MediaController.Callback() {
+                override fun onPlaybackStateChanged(state: PlaybackState?) {
+                    val pkg = c.packageName
+                    val newState = state?.state ?: PlaybackState.STATE_NONE
+                    val old = lastStates.put(pkg, newState)
+                    if (newState == PlaybackState.STATE_PLAYING && old != PlaybackState.STATE_PLAYING) {
+                        _playbackStarted.tryEmit(pkg)
+                    }
+                    pickActive()
+                }
 
-        // Find the most relevant controller (playing > paused > others)
-        val playing = controllers.find { 
-            it.playbackState?.state == PlaybackState.STATE_PLAYING 
+                override fun onMetadataChanged(metadata: MediaMetadata?) = pickActive()
+                override fun onSessionDestroyed() = setControllers(controllers.filter { it !== c })
+            }
+            callbacks[c] = cb
+            c.registerCallback(cb, handler)
+            lastStates[c.packageName] = c.playbackState?.state ?: PlaybackState.STATE_NONE
         }
-        val paused = controllers.find { 
-            it.playbackState?.state == PlaybackState.STATE_PAUSED 
-        }
-        val newController = playing ?: paused ?: controllers.first()
-
-        if (activeController != newController) {
-            activeController?.unregisterCallback(controllerCallback)
-            activeController = newController
-            activeController?.registerCallback(controllerCallback)
-            
-            LogServer.log("$TAG: New active controller: ${newController.packageName}")
-            updateMediaInfo(newController.metadata, newController.playbackState)
-        }
+        pickActive()
     }
 
-    private fun updateMediaInfo(metadata: MediaMetadata?, playbackState: PlaybackState?) {
-        val info = MediaInfo(
+    private fun pickActive() {
+        val playing = controllers.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING }
+        val chosen = playing
+            ?: activeController?.takeIf { it in controllers }
+            ?: controllers.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PAUSED }
+            ?: controllers.firstOrNull()
+        activeController = chosen
+        _mediaInfo.value = if (chosen == null) MediaInfo() else toInfo(chosen)
+    }
+
+    private fun toInfo(c: MediaController): MediaInfo {
+        val metadata = c.metadata
+        val state = c.playbackState
+        return MediaInfo(
             title = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE),
-            artist = metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST) 
+            artist = metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST)
                 ?: metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST),
             album = metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM),
             albumArt = metadata?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
-                ?: metadata?.getBitmap(MediaMetadata.METADATA_KEY_ART),
+                ?: metadata?.getBitmap(MediaMetadata.METADATA_KEY_ART)
+                ?: metadata?.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON),
             duration = metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0,
-            position = playbackState?.position ?: 0,
-            isPlaying = playbackState?.state == PlaybackState.STATE_PLAYING,
-            packageName = activeController?.packageName
+            position = livePosition(state),
+            isPlaying = state?.state == PlaybackState.STATE_PLAYING,
+            packageName = c.packageName,
         )
-        
-        _mediaInfo.value = info
-        
-        if (info.hasContent) {
-            LogServer.log("$TAG: Now playing: ${info.displayText()}")
+    }
+
+    /** Current position, extrapolated from the last update when playing. */
+    fun currentPosition(): Long = livePosition(activeController?.playbackState)
+
+    private fun livePosition(state: PlaybackState?): Long {
+        state ?: return 0
+        if (state.state != PlaybackState.STATE_PLAYING) return state.position
+        val elapsed = SystemClock.elapsedRealtime() - state.lastPositionUpdateTime
+        return state.position + (elapsed * state.playbackSpeed).toLong()
+    }
+
+    fun togglePlayback() {
+        val c = activeController ?: return
+        if (c.playbackState?.state == PlaybackState.STATE_PLAYING) c.transportControls.pause() else c.transportControls.play()
+    }
+
+    fun play() = activeController?.transportControls?.play()
+    fun pause() = activeController?.transportControls?.pause()
+    fun next() = activeController?.transportControls?.skipToNext()
+    fun previous() = activeController?.transportControls?.skipToPrevious()
+
+    companion object {
+        fun hasNotificationAccess(context: Context): Boolean {
+            val flat = android.provider.Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
+            return flat?.contains(ComponentName(context, NotificationListener::class.java).flattenToString()) == true
         }
     }
 }
 
 /**
- * NotificationListenerService stub for MediaSession access.
- * Must be declared in AndroidManifest.xml and enabled by user.
+ * Notification-listener access lets MediaSessionManager show us other apps' sessions. The
+ * system keeps this service bound, so it also hosts [AutoPlayWatcher]: start streaming to the
+ * usual speakers automatically when music starts at home.
  */
 class NotificationListener : NotificationListenerService() {
-    // Empty implementation - we just need this for MediaSession access
+    private var watcher: AutoPlayWatcher? = null
+
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        watcher = AutoPlayWatcher(applicationContext).also { it.start() }
+    }
+
+    override fun onListenerDisconnected() {
+        watcher?.stop()
+        watcher = null
+        super.onListenerDisconnected()
+    }
 }

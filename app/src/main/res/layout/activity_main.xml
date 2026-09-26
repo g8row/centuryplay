@@ -1,377 +1,394 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.coordinatorlayout.widget.CoordinatorLayout 
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:fitsSystemWindows="false"
-    tools:context=".MainActivity">
+    android:background="?attr/colorPrimaryContainer">
 
-    <!-- Background with dynamic primary color gradient -->
-    <View
-        android:id="@+id/backgroundGradient"
+    <LinearLayout
+        android:id="@+id/mainContent"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="?attr/colorPrimaryContainer"/>
+        android:orientation="vertical">
 
-    <androidx.core.widget.NestedScrollView
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:fillViewport="true">
-
+        <!-- Header -->
         <LinearLayout
-            android:id="@+id/mainContent"
+            android:id="@+id/header"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical">
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="24dp"
+            android:paddingTop="24dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="8dp">
 
-            <!-- Header with status bar padding applied programmatically -->
             <LinearLayout
-                android:id="@+id/header"
-                android:layout_width="match_parent"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:paddingHorizontal="24dp"
-                android:paddingTop="24dp"
-                android:paddingBottom="16dp">
+                android:layout_weight="1"
+                android:orientation="vertical">
 
-                <!-- App Title with expressive typography -->
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/app_name"
-                    android:textSize="32sp"
                     android:textColor="?attr/colorOnPrimaryContainer"
-                    android:textStyle="bold"/>
+                    android:textSize="32sp"
+                    android:textStyle="bold" />
 
                 <TextView
                     android:id="@+id/statusText"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:text="@string/no_speakers_found"
-                    android:textSize="14sp"
+                    android:layout_marginTop="4dp"
+                    android:alpha="0.8"
+                    android:textAppearance="?attr/textAppearanceBodyMedium"
                     android:textColor="?attr/colorOnPrimaryContainer"
-                    android:alpha="0.8"/>
-
-                <!-- Settings button -->
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/settingsButton"
-                    style="@style/Widget.Material3.Button.IconButton"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
-                    android:layout_gravity="end"
-                    android:contentDescription="@string/settings"
-                    app:icon="@drawable/ic_settings"
-                    app:iconTint="?attr/colorOnPrimaryContainer"
-                    android:layout_marginTop="-48dp"/>
+                    tools:text="3 speakers nearby" />
             </LinearLayout>
 
-            <!-- Wavy Divider -->
-            <ImageView
-                android:layout_width="match_parent"
-                android:layout_height="24dp"
-                android:src="@drawable/wavy_divider"
-                android:scaleType="fitXY"
-                android:alpha="0.6"
-                android:importantForAccessibility="no"/>
+            <ImageButton
+                android:id="@+id/refreshButton"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:contentDescription="@string/refresh_speakers"
+                android:src="@drawable/ic_refresh"
+                app:tint="?attr/colorOnPrimaryContainer" />
 
-            <!-- Speaker List Card with expressive corners -->
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/speakersCard"
-                style="@style/Widget.AirPlay.Card.Expressive"
-                android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="1"
-                android:layout_marginHorizontal="16dp"
-                android:layout_marginTop="8dp"
-                android:layout_marginBottom="8dp"
-                android:minHeight="200dp"
-                app:cardBackgroundColor="?attr/colorSurface">
+            <ImageButton
+                android:id="@+id/settingsButton"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:contentDescription="@string/settings"
+                android:src="@drawable/ic_settings"
+                app:tint="?attr/colorOnPrimaryContainer" />
+        </LinearLayout>
 
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:orientation="vertical">
+        <HorizontalScrollView
+            android:id="@+id/groupsScroll"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:clipToPadding="false"
+            android:paddingHorizontal="20dp"
+            android:scrollbars="none"
+            android:visibility="gone">
 
-                    <!-- Section header -->
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:padding="16dp">
+            <com.google.android.material.chip.ChipGroup
+                android:id="@+id/groupChips"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                app:singleLine="true" />
+        </HorizontalScrollView>
 
-                        <ImageView
-                            android:layout_width="24dp"
-                            android:layout_height="24dp"
-                            android:src="@drawable/ic_speaker"
-                            app:tint="?attr/colorPrimary"
-                            android:contentDescription="@null"/>
+        <!-- Wavy divider (the app's signature) -->
+        <ImageView
+            android:layout_width="match_parent"
+            android:layout_height="24dp"
+            android:alpha="0.6"
+            android:importantForAccessibility="no"
+            android:scaleType="fitXY"
+            android:src="@drawable/wavy_divider" />
 
-                        <TextView
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:layout_marginStart="12dp"
-                            android:text="@string/available_speakers"
-                            android:textSize="16sp"
-                            android:textStyle="bold"
-                            android:textColor="?attr/colorOnSurface"/>
+        <!-- Setup / permission card -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/setupCard"
+            style="@style/Widget.Material3.CardView.Filled"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="16dp"
+            android:layout_marginVertical="8dp"
+            android:visibility="gone"
+            app:cardBackgroundColor="?attr/colorSurface"
+            app:cardCornerRadius="24dp"
+            tools:visibility="visible">
 
-                        <ImageButton
-                            android:id="@+id/refreshButton"
-                            android:layout_width="40dp"
-                            android:layout_height="40dp"
-                            android:background="?attr/selectableItemBackgroundBorderless"
-                            android:src="@drawable/ic_refresh"
-                            app:tint="?attr/colorPrimary"
-                            android:contentDescription="@string/refresh_speakers"/>
-                    </LinearLayout>
-
-                    <!-- Simple divider line -->
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="1dp"
-                        android:layout_marginHorizontal="16dp"
-                        android:background="@drawable/gradient_divider"/>
-
-                    <FrameLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="0dp"
-                        android:layout_weight="1">
-
-                        <androidx.recyclerview.widget.RecyclerView
-                            android:id="@+id/speakersRecyclerView"
-                            android:layout_width="match_parent"
-                            android:layout_height="match_parent"
-                            android:clipToPadding="false"
-                            android:padding="8dp"/>
-
-                        <!-- Empty state -->
-                        <LinearLayout
-                            android:id="@+id/emptyView"
-                            android:layout_width="match_parent"
-                            android:layout_height="match_parent"
-                            android:orientation="vertical"
-                            android:gravity="center"
-                            android:visibility="visible">
-
-                            <com.google.android.material.progressindicator.CircularProgressIndicator
-                                android:id="@+id/searchingIndicator"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:indeterminate="true"
-                                app:indicatorColor="?attr/colorPrimary"
-                                app:trackColor="?attr/colorSurfaceVariant"/>
-
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="16dp"
-                                android:text="@string/searching_speakers"
-                                android:textSize="14sp"
-                                android:textColor="?attr/colorOnSurfaceVariant"/>
-                        </LinearLayout>
-                    </FrameLayout>
-
-                    <!-- Footer tip -->
-                    <TextView
-                        android:id="@+id/speakerListFooter"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:paddingHorizontal="16dp"
-                        android:paddingVertical="8dp"
-                        android:text="tap a speaker to select it"
-                        android:textSize="12sp"
-                        android:textColor="?attr/colorOnSurfaceVariant"
-                        android:alpha="0.6"
-                        android:gravity="center"/>
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <!-- Controls Card with expressive styling -->
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/controlsCard"
-                style="@style/Widget.AirPlay.Card.Expressive"
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginHorizontal="16dp"
-                android:layout_marginBottom="16dp"
-                app:cardBackgroundColor="?attr/colorSurface">
+                android:orientation="vertical"
+                android:padding="20dp">
+
+                <TextView
+                    android:id="@+id/setupTitle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="?attr/textAppearanceTitleMedium"
+                    android:textColor="?attr/colorPrimary"
+                    android:textStyle="bold"
+                    tools:text="one-tap setup with shizuku" />
+
+                <TextView
+                    android:id="@+id/setupText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:textAppearance="?attr/textAppearanceBodyMedium"
+                    android:textColor="?attr/colorOnSurfaceVariant"
+                    tools:text="skip every permission prompt" />
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="20dp">
+                    android:layout_marginTop="12dp"
+                    android:gravity="end"
+                    android:orientation="horizontal">
 
-                    <!-- Connected Speaker Info -->
-                    <LinearLayout
-                        android:id="@+id/connectedSpeakerLayout"
-                        android:layout_width="match_parent"
+                    <Button
+                        android:id="@+id/setupDismiss"
+                        style="@style/Widget.Material3.Button.TextButton"
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:visibility="gone"
-                        android:layout_marginBottom="12dp">
+                        android:text="@string/dismiss" />
 
-                        <View
-                            android:id="@+id/connectionIndicator"
-                            android:layout_width="12dp"
-                            android:layout_height="12dp"
-                            android:background="@drawable/indicator_dot"/>
+                    <Button
+                        android:id="@+id/setupButton"
+                        style="@style/Widget.Material3.Button"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        tools:text="set up" />
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
 
-                        <LinearLayout
-                            android:layout_width="0dp"
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/speakersCard"
+            style="@style/Widget.Material3.CardView.Filled"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_marginHorizontal="12dp"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="12dp"
+            android:layout_weight="1"
+            app:cardBackgroundColor="?attr/colorSurface"
+            app:cardCornerRadius="28dp">
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/speakersRecyclerView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clipToPadding="false"
+                android:paddingHorizontal="8dp"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"
+                tools:listitem="@layout/item_speaker" />
+
+            <LinearLayout
+                android:id="@+id/emptyView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:gravity="center"
+                android:orientation="vertical"
+                android:padding="32dp">
+
+                <com.google.android.material.progressindicator.CircularProgressIndicator
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:indeterminate="true" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="@string/searching_speakers"
+                    android:textAppearance="?attr/textAppearanceTitleMedium" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:gravity="center"
+                    android:text="@string/searching_hint"
+                    android:textAppearance="?attr/textAppearanceBodyMedium"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
+            </LinearLayout>
+        </FrameLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- Now playing / group controls (visible while streaming) -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/controlsCard"
+            style="@style/Widget.Material3.CardView.Filled"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone"
+            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+            app:shapeAppearanceOverlay="@style/ShapeAppearance.AirPlay.TopSheet"
+            tools:visibility="visible">
+
+            <LinearLayout
+                android:id="@+id/controlsContent"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingHorizontal="20dp"
+                android:paddingTop="20dp"
+                android:paddingBottom="12dp">
+
+                <LinearLayout
+                    android:id="@+id/nowPlayingLayout"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <com.google.android.material.imageview.ShapeableImageView
+                        android:id="@+id/albumArt"
+                        android:layout_width="56dp"
+                        android:layout_height="56dp"
+                        android:background="?attr/colorSecondaryContainer"
+                        android:contentDescription="@null"
+                        android:padding="0dp"
+                        android:scaleType="centerCrop"
+                        android:src="@drawable/ic_music_note"
+                        app:shapeAppearanceOverlay="@style/ShapeAppearance.AirPlay.MediumComponent" />
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="14dp"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/nowPlayingTitle"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:layout_marginStart="12dp"
-                            android:orientation="vertical">
+                            android:ellipsize="end"
+                            android:maxLines="1"
+                            android:textAppearance="?attr/textAppearanceTitleMedium"
+                            tools:text="song title" />
 
-                            <TextView
-                                android:id="@+id/connectedSpeakerName"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:textSize="16sp"
-                                android:textStyle="bold"
-                                android:textColor="?attr/colorOnSurface"
-                                tools:text="Living Room Speaker"/>
+                        <TextView
+                            android:id="@+id/nowPlayingArtist"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:ellipsize="end"
+                            android:maxLines="1"
+                            android:textAppearance="?attr/textAppearanceBodyMedium"
+                            android:textColor="?attr/colorOnSurfaceVariant"
+                            tools:text="artist" />
 
-                            <TextView
-                                android:id="@+id/streamingStatusText"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:textSize="12sp"
-                                android:textColor="?attr/colorPrimary"
-                                android:visibility="gone"
-                                android:text="streaming..."/>
-                        </LinearLayout>
+                        <com.google.android.material.progressindicator.LinearProgressIndicator
+                            android:id="@+id/trackProgress"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:max="1000"
+                            android:visibility="invisible"
+                            app:trackCornerRadius="2dp"
+                            app:trackThickness="3dp" />
+                    </LinearLayout>
 
-                        <!-- Protocol badge -->
-                        <com.google.android.material.chip.Chip
-                            android:id="@+id/protocolChip"
+                    <ImageButton
+                        android:id="@+id/prevButton"
+                        style="@style/Widget.Material3.Button.IconButton"
+                        android:layout_width="44dp"
+                        android:layout_height="44dp"
+                        android:contentDescription="previous"
+                        android:src="@drawable/ic_skip_previous" />
+
+                    <ImageButton
+                        android:id="@+id/playPauseButton"
+                        style="@style/Widget.Material3.Button.IconButton.Filled"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:contentDescription="play or pause"
+                        android:src="@drawable/ic_pause" />
+
+                    <ImageButton
+                        android:id="@+id/nextButton"
+                        style="@style/Widget.Material3.Button.IconButton"
+                        android:layout_width="44dp"
+                        android:layout_height="44dp"
+                        android:contentDescription="next"
+                        android:src="@drawable/ic_skip_next" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/groupVolumeLayout"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <ImageView
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:contentDescription="@string/volume"
+                        android:src="@drawable/ic_volume_up"
+                        app:tint="?attr/colorOnSurfaceVariant" />
+
+                    <com.airplay.streamer.ui.WavySlider
+                        android:id="@+id/groupVolumeSlider"
+                        android:layout_width="0dp"
+                        android:layout_height="40dp"
+                        android:layout_marginStart="12dp"
+                        android:layout_weight="1"
+                        android:contentDescription="@string/group_volume" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/streamingRow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/streamingStatusText"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="v2"
-                            android:textSize="10sp"
-                            app:chipMinHeight="24dp"
-                            app:chipBackgroundColor="?attr/colorSecondaryContainer"
-                            android:textColor="?attr/colorOnSecondaryContainer"/>
-                    </LinearLayout>
+                            android:textAppearance="?attr/textAppearanceLabelLarge"
+                            android:textColor="?attr/colorPrimary"
+                            tools:text="playing on century" />
 
-                    <!-- Stream Button with expressive styling -->
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/streamButton"
-                        style="@style/Widget.AirPlay.Button.Expressive"
-                        android:layout_width="match_parent"
-                        android:layout_height="56dp"
-                        android:text="@string/start_streaming"
-                        android:textSize="16sp"
-                        android:enabled="false"
-                        app:icon="@drawable/ic_play"
-                        app:iconGravity="textStart"
-                        app:iconPadding="8dp"/>
-
-                    <!-- Volume Slider with Material 3 styling -->
-                    <LinearLayout
-                        android:id="@+id/volumeLayout"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="16dp"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:visibility="gone">
-
-                        <ImageView
-                            android:layout_width="24dp"
-                            android:layout_height="24dp"
-                            android:src="@drawable/ic_volume"
-                            app:tint="?attr/colorOnSurfaceVariant"
-                            android:contentDescription="@string/volume"/>
-
-                        <com.airplay.streamer.ui.WavySlider
-                            android:id="@+id/volumeSlider"
-                            android:layout_width="0dp"
-                            android:layout_height="48dp"
-                            android:layout_weight="1"
-                            android:layout_marginHorizontal="8dp"/>
-                    </LinearLayout>
-
-                    <!-- Now Playing Info (visible when streaming) -->
-                    <LinearLayout
-                        android:id="@+id/nowPlayingLayout"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="16dp"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:visibility="gone"
-                        android:padding="12dp"
-                        android:background="@drawable/now_playing_bg">
-
-                        <com.google.android.material.card.MaterialCardView
-                            android:layout_width="48dp"
-                            android:layout_height="48dp"
-                            app:cardCornerRadius="12dp"
-                            app:cardElevation="0dp"
-                            app:strokeWidth="0dp">
-
-                            <ImageView
-                                android:id="@+id/albumArt"
-                                android:layout_width="match_parent"
-                                android:layout_height="match_parent"
-                                android:scaleType="centerCrop"
-                                android:src="@drawable/ic_music_note"
-                                app:tint="?attr/colorOnSurfaceVariant"
-                                android:background="@drawable/album_art_placeholder"
-                                android:contentDescription="album art"/>
-                        </com.google.android.material.card.MaterialCardView>
-
-                        <LinearLayout
-                            android:layout_width="0dp"
+                        <com.google.android.material.progressindicator.LinearProgressIndicator
+                            android:id="@+id/levelMeter"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:layout_marginStart="12dp"
-                            android:orientation="vertical">
-
-                            <TextView
-                                android:id="@+id/nowPlayingTitle"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:textSize="14sp"
-                                android:textStyle="bold"
-                                android:textColor="?attr/colorOnSurface"
-                                android:singleLine="true"
-                                android:ellipsize="marquee"
-                                android:marqueeRepeatLimit="marquee_forever"
-                                android:focusable="true"
-                                android:focusableInTouchMode="true"
-                                tools:text="Song Title"/>
-
-                            <TextView
-                                android:id="@+id/nowPlayingArtist"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:textSize="12sp"
-                                android:textColor="?attr/colorOnSurfaceVariant"
-                                android:singleLine="true"
-                                android:ellipsize="end"
-                                tools:text="Artist Name • Album"/>
-                        </LinearLayout>
-
-                        <ImageButton
-                            android:id="@+id/playPauseButton"
-                            android:layout_width="48dp"
-                            android:layout_height="48dp"
-                            android:background="?attr/selectableItemBackgroundBorderless"
-                            android:src="@drawable/ic_play"
-                            app:tint="?attr/colorOnSurface"
-                            android:contentDescription="Play/Pause"/>
+                            android:layout_marginTop="6dp"
+                            android:layout_marginEnd="16dp"
+                            android:max="100"
+                            app:trackCornerRadius="4dp"
+                            app:trackThickness="4dp" />
                     </LinearLayout>
+
+                    <ImageButton
+                        android:id="@+id/timerButton"
+                        style="@style/Widget.Material3.Button.IconButton"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:layout_marginEnd="4dp"
+                        android:contentDescription="@string/sleep_timer"
+                        android:src="@drawable/ic_timer" />
+
+                    <Button
+                        android:id="@+id/stopButton"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/stop_streaming"
+                        app:icon="@drawable/ic_stop" />
                 </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-        </LinearLayout>
-    </androidx.core.widget.NestedScrollView>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+    </LinearLayout>
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

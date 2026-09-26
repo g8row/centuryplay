@@ -1,157 +1,74 @@
 package com.airplay.streamer
 
-import android.Manifest
-import android.app.Activity
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import android.view.View
-import android.widget.Toast
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.airplay.streamer.databinding.ActivityTileDeviceBinding
-import com.airplay.streamer.discovery.AirPlayDevice
-import com.airplay.streamer.raop.RaopCapabilities
-import com.airplay.streamer.service.AudioCaptureService
+import com.airplay.streamer.engine.SpeakerStatus
+import com.airplay.streamer.service.StreamController
+import com.airplay.streamer.shizuku.ShizukuManager
 import com.airplay.streamer.ui.MainViewModel
 import com.airplay.streamer.ui.SpeakerAdapter
 import com.google.android.material.color.DynamicColors
 import kotlinx.coroutines.launch
 
+/**
+ * Quick output picker opened from the Quick Settings tile: tap speakers to add/remove them
+ * from the stream, adjust their volume, or stop everything. Tap outside to close.
+ */
 class TileDeviceActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityTileDeviceBinding
     private val viewModel: MainViewModel by viewModels()
-    private lateinit var speakerAdapter: SpeakerAdapter
-
-    private var pendingDevice: AirPlayDevice? = null
-
-    private val mediaProjectionLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
-            pendingDevice?.let { device ->
-                startStreamingService(result.resultCode, result.data!!, device)
-            }
-        } else {
-            Toast.makeText(this, "Permission denied", Toast.LENGTH_SHORT).show()
-        }
-        finish()
-    }
-
-    private val permissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val allGranted = permissions.values.all { it }
-        if (allGranted) {
-            pendingDevice?.let { requestMediaProjection(it) }
-        } else {
-            Toast.makeText(this, "Permissions required", Toast.LENGTH_LONG).show()
-            finish()
-        }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         DynamicColors.applyToActivityIfAvailable(this)
         super.onCreate(savedInstanceState)
-        
         binding = ActivityTileDeviceBinding.inflate(layoutInflater)
         setContentView(binding.root)
-
-        // Close when clicking outside the card (on the dim area)
+        ShizukuManager.init(this)
         binding.root.setOnClickListener { finish() }
-        
-        setupRecyclerView()
-        observeState()
-    }
 
-    private fun setupRecyclerView() {
-        speakerAdapter = SpeakerAdapter { device ->
-            checkPermissionsAndStart(device)
+        val adapter = SpeakerAdapter(
+            onClick = { row ->
+                if (!row.supported) return@SpeakerAdapter
+                when (row.state?.status) {
+                    null, SpeakerStatus.FAILED, SpeakerStatus.NEEDS_ACCEPT -> {
+                        if (row.state != null) StreamController.disconnect(this, row.device.identity)
+                        StreamController.connect(this, row.device)
+                    }
+                    SpeakerStatus.NEEDS_PASSWORD, SpeakerStatus.NEEDS_PIN -> {
+                        // Passwords are entered in the main app.
+                        startActivity(android.content.Intent(this, MainActivity::class.java))
+                        finish()
+                    }
+                    else -> StreamController.disconnect(this, row.device.identity)
+                }
+            },
+            onLongClick = {},
+            onVolume = { row, v -> StreamController.setSpeakerVolume(row.device.identity, v) },
+        )
+        binding.speakersRecyclerView.layoutManager = LinearLayoutManager(this)
+        binding.speakersRecyclerView.adapter = adapter
+        binding.stopAllButton.setOnClickListener {
+            StreamController.stopAll(this)
+            finish()
         }
 
-        binding.speakersRecyclerView.apply {
-            layoutManager = LinearLayoutManager(this@TileDeviceActivity)
-            adapter = speakerAdapter
-        }
-    }
-
-    private fun observeState() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 viewModel.uiState.collect { state ->
-                    val items = state.devices.map { device ->
-                        SpeakerAdapter.SpeakerItem(device = device, isConnected = false)
-                    }
-                    speakerAdapter.submitList(items)
-                    binding.emptyView.visibility = if (state.devices.isEmpty()) View.VISIBLE else View.GONE
-                    
-                    if (state.devices.isNotEmpty()) {
-                        binding.loadingIndicator.visibility = View.GONE
-                    }
+                    adapter.submitList(state.rows)
+                    binding.emptyView.visibility = if (state.rows.isEmpty()) View.VISIBLE else View.GONE
+                    binding.loadingIndicator.visibility = if (state.searching) View.VISIBLE else View.GONE
+                    binding.stopAllButton.visibility = if (state.session.capturing) View.VISIBLE else View.GONE
                 }
             }
         }
-        
-        lifecycleScope.launch {
-            kotlinx.coroutines.delay(5000)
-            binding.loadingIndicator.visibility = View.GONE
-        }
-    }
-
-    private fun checkPermissionsAndStart(device: AirPlayDevice) {
-        if (RaopCapabilities.requiresUnsupportedFairPlay(device.features)) {
-            Toast.makeText(
-                this,
-                getString(R.string.fairplay_required_message, device.displayName),
-                Toast.LENGTH_LONG
-            ).show()
-            finish()
-            return
-        }
-
-        val permissions = arrayOf(
-            Manifest.permission.RECORD_AUDIO,
-            Manifest.permission.POST_NOTIFICATIONS
-        )
-
-        val notGranted = permissions.filter {
-            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-        }
-
-        if (notGranted.isEmpty()) {
-            requestMediaProjection(device)
-        } else {
-            pendingDevice = device
-            permissionLauncher.launch(notGranted.toTypedArray())
-        }
-    }
-
-    private fun requestMediaProjection(device: AirPlayDevice) {
-        pendingDevice = device
-        val projectionManager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        mediaProjectionLauncher.launch(projectionManager.createScreenCaptureIntent())
-    }
-
-    private fun startStreamingService(resultCode: Int, data: Intent, device: AirPlayDevice) {
-        val serviceIntent = Intent(this, AudioCaptureService::class.java).apply {
-            action = AudioCaptureService.ACTION_START
-            putExtra(AudioCaptureService.EXTRA_RESULT_CODE, resultCode)
-            putExtra(AudioCaptureService.EXTRA_RESULT_DATA, data)
-            putExtra(AudioCaptureService.EXTRA_HOST, device.host)
-            putExtra(AudioCaptureService.EXTRA_PORT, device.raopPort ?: device.port)
-            putExtra(AudioCaptureService.EXTRA_DEVICE_NAME, device.displayName)
-            putExtra(AudioCaptureService.EXTRA_DEVICE_FEATURES,
-                device.features.entries.joinToString(";") { "${it.key}=${it.value}" })
-        }
-        startForegroundService(serviceIntent)
-        finish()
     }
 }

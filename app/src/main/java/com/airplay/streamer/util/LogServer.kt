@@ -53,16 +53,16 @@ object LogServer {
     }
     
     fun log(message: String) {
-        val timestamp = dateFormat.format(Date())
-        val entry = "[$timestamp] $message"
-        logs.add(entry)
         Log.d(TAG, message)
-        
-        // Keep log size bounded
-        while (logs.size > MAX_LOGS) {
-            logs.poll()
+        // SimpleDateFormat isn't thread-safe and ConcurrentLinkedQueue.size is O(n): guard both.
+        synchronized(logs) {
+            logs.add("[${dateFormat.format(Date())}] $message")
+            while (logs.size > MAX_LOGS) logs.poll()
         }
     }
+
+    /** Snapshot of the buffered log lines, oldest first. */
+    fun snapshot(): List<String> = synchronized(logs) { logs.toList() }
     
     fun d(tag: String, message: String) {
         log("D/$tag: $message")
@@ -77,13 +77,12 @@ object LogServer {
         try {
             val writer = PrintWriter(client.getOutputStream(), true)
             
-            // Read request (we don't care about the content)
-            client.getInputStream().bufferedReader().readLine()
-            
-            // Send HTML response with auto-refresh
-            val html = buildHtml()
+            // GET /text returns plain text (newest last) for scripts; anything else the HTML view.
+            val requestLine = client.getInputStream().bufferedReader().readLine() ?: ""
+            val plain = requestLine.contains(" /text")
+            val html = if (plain) snapshot().joinToString("\n") else buildHtml()
             writer.print("HTTP/1.1 200 OK\r\n")
-            writer.print("Content-Type: text/html; charset=utf-8\r\n")
+            writer.print("Content-Type: ${if (plain) "text/plain" else "text/html"}; charset=utf-8\r\n")
             writer.print("Content-Length: ${html.toByteArray().size}\r\n")
             writer.print("Connection: close\r\n")
             writer.print("\r\n")
@@ -97,7 +96,7 @@ object LogServer {
     }
     
     private fun buildHtml(): String {
-        val logContent = logs.reversed().joinToString("\n") { escapeHtml(it) }
+        val logContent = snapshot().reversed().joinToString("\n") { escapeHtml(it) }
         
         return """
 <!DOCTYPE html>
