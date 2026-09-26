@@ -4,7 +4,7 @@ stream audio from your android device to airplay speakers.
 
 ![android](https://img.shields.io/badge/android-11%2B-green)
 ![airplay](https://img.shields.io/badge/airplay-1%20%2B%202-blue)
-![license](https://img.shields.io/badge/license-mit-yellow)
+![license](https://img.shields.io/badge/license-agpl--3.0-yellow)
 
 <div align="center">
   <img src="images/main.png" width="220" />
@@ -205,7 +205,7 @@ contributions welcome. submit a pull request.
 
 ## license
 
-mit license. see [license](LICENSE) file.
+gnu agpl v3. see [license](LICENSE). bundled apple alac codec: apache 2.0 (app/src/main/cpp/alac).
 
 ## acknowledgments
 
