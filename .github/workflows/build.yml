@@ -1,0 +1,32 @@
+name: build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install NDK and CMake (ALAC encoder)
+        run: sdkmanager "ndk;27.2.12479018" "cmake;3.22.1"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug testDebugUnitTest --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: centuryplay-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
