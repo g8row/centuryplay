@@ -92,6 +92,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupInsets() {
+        // Side insets (landscape navigation bar, cutouts); children still get the rest.
+        ViewCompat.setOnApplyWindowInsetsListener(binding.mainContent) { v, insets ->
+            val side = insets.getInsets(WindowInsetsCompat.Type.navigationBars() or WindowInsetsCompat.Type.displayCutout())
+            v.updatePadding(left = side.left, right = side.right)
+            insets
+        }
         ViewCompat.setOnApplyWindowInsetsListener(binding.header) { v, insets ->
             v.updatePadding(top = insets.getInsets(WindowInsetsCompat.Type.statusBars()).top + dp(16))
             insets

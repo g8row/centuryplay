@@ -173,7 +173,8 @@ class RaopSink(
             throw SinkException(SinkError.UNREACHABLE, "Can't reach $displayName", e)
         } catch (e: SocketTimeoutException) {
             closeQuietly()
-            throw SinkException(SinkError.UNREACHABLE, "$displayName is not responding", e)
+            // shairport-sync doesn't reject a second sender, it just doesn't answer.
+            throw SinkException(SinkError.UNREACHABLE, "$displayName is not responding (busy with another device?)", e)
         } catch (e: Exception) {
             closeQuietly()
             throw SinkException(SinkError.PROTOCOL, "Connection to $displayName failed: ${e.message}", e)

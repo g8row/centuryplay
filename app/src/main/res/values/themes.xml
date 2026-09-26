@@ -4,21 +4,21 @@
     <style name="Theme.AirPlayStreamer" parent="Theme.Material3.DayNight.NoActionBar">
         <!-- Dynamic colors will be applied automatically on Android 12+ -->
         <!-- These are fallback colors for older devices -->
-        <item name="colorPrimary">@color/purple_500</item>
-        <item name="colorOnPrimary">@android:color/white</item>
-        <item name="colorPrimaryContainer">@color/purple_200</item>
-        <item name="colorOnPrimaryContainer">@color/purple_700</item>
-        
-        <item name="colorSecondary">@color/teal_200</item>
-        <item name="colorOnSecondary">@android:color/black</item>
-        <item name="colorSecondaryContainer">@color/teal_200</item>
-        <item name="colorOnSecondaryContainer">@color/teal_700</item>
-        
-        <!-- Surface colors -->
-        <item name="colorSurface">?android:attr/colorBackground</item>
-        <item name="colorOnSurface">?android:attr/textColorPrimary</item>
-        <item name="colorSurfaceVariant">@color/purple_200</item>
-        
+        <item name="colorPrimary">@color/md_primary</item>
+        <item name="colorOnPrimary">@color/md_on_primary</item>
+        <item name="colorPrimaryContainer">@color/md_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/md_on_primary_container</item>
+        <item name="colorSecondary">@color/md_secondary</item>
+        <item name="colorOnSecondary">@color/md_on_secondary</item>
+        <item name="colorSecondaryContainer">@color/md_secondary_container</item>
+        <item name="colorOnSecondaryContainer">@color/md_on_secondary_container</item>
+        <item name="colorSurface">@color/md_surface</item>
+        <item name="colorOnSurface">@color/md_on_surface</item>
+        <item name="colorSurfaceVariant">@color/md_surface_variant</item>
+        <item name="colorOnSurfaceVariant">@color/md_on_surface_variant</item>
+        <item name="colorSurfaceContainerHigh">@color/md_surface_container_high</item>
+        <item name="android:colorBackground">@color/md_surface</item>
+
         <!-- Edge-to-edge: Translucent status bar (visible icons) -->
         <item name="android:statusBarColor">@color/status_bar_scrim</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
