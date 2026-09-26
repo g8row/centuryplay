@@ -75,6 +75,7 @@
     <string name="password_hint">speaker password</string>
     <string name="ok">ok</string>
     <string name="cancel">cancel</string>
+    <string name="remove_speaker">remove</string>
     <string name="forget_password">forget password</string>
 
     <!-- setup card -->

@@ -227,7 +227,9 @@ class MainActivity : AppCompatActivity() {
             .setTitle(d.displayName.lowercase())
             .setView(android.widget.ScrollView(this).apply { addView(panel) })
             .setPositiveButton(R.string.ok, null)
-        if (prefs.password(d.identity) != null) {
+        if (d.identity.startsWith("manual_")) {
+            builder.setNeutralButton(R.string.remove_speaker) { _, _ -> viewModel.removeManualSpeaker(d.identity) }
+        } else if (prefs.password(d.identity) != null) {
             builder.setNeutralButton(R.string.forget_password) { _, _ -> prefs.setPassword(d.identity, null) }
         } else if (row.transport == com.airplay.streamer.engine.Transport.AIRPLAY2) {
             if (prefs.hapStore.load(d.identity) != null) {
@@ -497,12 +499,7 @@ class MainActivity : AppCompatActivity() {
         if (!raw.getBoolean("manual_device_pending", false)) return
         val host = raw.getString("manual_device_host", null) ?: return
         val port = raw.getInt("manual_device_port", 5000)
-        viewModel.addManualDevice(
-            AirPlayDevice(
-                name = host, host = host, port = port, deviceId = "manual_$host",
-                protocolVersion = 1, raopPort = port, identity = "manual_$host:$port",
-            )
-        )
+        viewModel.addManualSpeaker("$host:$port")
         raw.edit().putBoolean("manual_device_pending", false).apply()
         Toast.makeText(this, "added $host:$port", Toast.LENGTH_SHORT).show()
     }

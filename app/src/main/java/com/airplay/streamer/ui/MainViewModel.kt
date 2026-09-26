@@ -50,6 +50,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         repository.startDiscovery()
         tracker.start()
+        manualDevices.value = prefs.manualSpeakers.mapNotNull { manualDevice(it) }
+    }
+
+    /** "host:port" → a RAOP device (manual entries are AirPlay 1 unless the port is 7000). */
+    private fun manualDevice(spec: String): AirPlayDevice? {
+        val host = spec.substringBefore(":").trim().ifEmpty { return null }
+        val port = spec.substringAfter(":", "5000").toIntOrNull() ?: 5000
+        return AirPlayDevice(
+            name = host, host = host, port = port, deviceId = "manual_$host",
+            protocolVersion = 1, raopPort = port, identity = "manual_$host:$port",
+        )
+    }
+
+    fun addManualSpeaker(spec: String) {
+        prefs.manualSpeakers = prefs.manualSpeakers + spec
+        manualDevice(spec)?.let { addManualDevice(it) }
+    }
+
+    fun removeManualSpeaker(identity: String) {
+        prefs.manualSpeakers = prefs.manualSpeakers.filterNot { "manual_$it" == identity }.toSet()
+        manualDevices.value = manualDevices.value.filterNot { it.identity == identity }
     }
 
     fun refreshTracker() = tracker.tryRegister()

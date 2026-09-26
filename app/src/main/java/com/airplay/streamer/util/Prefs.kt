@@ -112,6 +112,11 @@ class Prefs(context: Context) {
         recentGroups = listOf(ids to label) + recentGroups.filterNot { it.first == ids }
     }
 
+    /** Manually added speakers ("host:port"), kept across restarts. */
+    var manualSpeakers: Set<String>
+        get() = raw.getStringSet("manual_speakers", emptySet()) ?: emptySet()
+        set(v) = raw.edit().putStringSet("manual_speakers", v).apply()
+
     fun speakerVolume(identity: String): Float = raw.getFloat("vol_$identity", 0.6f)
     fun setSpeakerVolume(identity: String, v: Float) = raw.edit().putFloat("vol_$identity", v).apply()
 
