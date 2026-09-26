@@ -5,6 +5,7 @@ stream audio from your android device to airplay speakers.
 ![android](https://img.shields.io/badge/android-11%2B-green)
 ![airplay](https://img.shields.io/badge/airplay-1%20%2B%202-blue)
 ![license](https://img.shields.io/badge/license-agpl--3.0-yellow)
+[![build](https://github.com/g8row/centuryplay/actions/workflows/build.yml/badge.svg)](https://github.com/g8row/centuryplay/actions/workflows/build.yml)
 
 <div align="center">
   <img src="images/main.png" width="220" />
@@ -99,7 +100,8 @@ bottom line: excellent quality, but not bit-perfect hi-res. cd quality (16-bit/4
 
 ### from release
 
-download the latest apk from the [releases](https://github.com/g8row/centuryplay/releases) page.
+download `centuryplay-v2.0.apk` from the [latest release](https://github.com/g8row/centuryplay/releases/latest). it installs over v1.x.
+every push to master also builds a debug apk (actions → build → artifacts).
 
 ## usage
 
