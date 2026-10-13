@@ -135,6 +135,8 @@ object ShizukuManager {
             "Skip screen-capture consent" to "appops set $pkg PROJECT_MEDIA allow",
             "Microphone/capture" to "pm grant $pkg android.permission.RECORD_AUDIO",
             "Notifications" to "pm grant $pkg android.permission.POST_NOTIFICATIONS",
+            "Nearby devices" to "pm grant $pkg android.permission.NEARBY_WIFI_DEVICES",
+            "Local network" to "pm grant $pkg android.permission.ACCESS_LOCAL_NETWORK",
             "Track info access" to "cmd notification allow_listener $listener",
             "Battery optimisation exemption" to "cmd deviceidle whitelist +$pkg",
             "Background running" to "appops set $pkg RUN_ANY_IN_BACKGROUND allow",
