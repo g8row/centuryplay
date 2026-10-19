@@ -11,6 +11,10 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // Xposed API (compile-only): LSPosed / Vector hooks in xposed/.
+        maven("https://api.xposed.info/") {
+            content { includeGroup("de.robv.android.xposed") }
+        }
     }
 }
 

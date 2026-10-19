@@ -107,6 +107,9 @@ dependencies {
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
 
+    // LSPosed / Vector module API, provided by the framework at runtime.
+    compileOnly("de.robv.android.xposed:api:82")
+
     // Unit testing
     testImplementation("junit:junit:4.13.2")
 }

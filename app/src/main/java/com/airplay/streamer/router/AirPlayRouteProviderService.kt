@@ -21,6 +21,7 @@ import com.airplay.streamer.engine.Transport
 import com.airplay.streamer.service.AudioCaptureService
 import com.airplay.streamer.service.MediaInfoTracker
 import com.airplay.streamer.service.StreamController
+import com.airplay.streamer.system.HookStatus
 import com.airplay.streamer.util.LogServer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -120,7 +121,10 @@ class AirPlayRouteProviderService : MediaRoute2ProviderService() {
         val state = lastState
         // Route ids must be unique or MediaRoute2ProviderInfo throws (and takes the app down).
         val speakers = lastDevices.filter { SinkFactory.transportFor(it) != Transport.UNSUPPORTED }.distinctBy { routeId(it) }
-        val routes = speakers.map { toRoute(it, state) } + phoneRoute(state)
+        // With the LSPosed module, SettingsLib lists our speakers next to the system's own outputs
+        // ("This tablet", Bluetooth), so the stand-ins below aren't needed.
+        val hooked = HookStatus.active()
+        val routes = speakers.map { toRoute(it, state) } + if (hooked) emptyList() else listOf(phoneRoute(state))
         notifyRoutes(routes)
         val airplayIds = speakers.map { routeId(it) }
         val selected = state.activeSpeakers.map { "airplay_${it.identity}" }.filter { it in airplayIds }
@@ -140,7 +144,7 @@ class AirPlayRouteProviderService : MediaRoute2ProviderService() {
         val wanted = LinkedHashMap<String, String>()
         if (streaming) wanted[OWN_SESSION] = packageName
         val offerInSwitcher = com.airplay.streamer.util.Prefs(this).systemSwitcher &&
-            (streaming || !externalOutputConnected())
+            (streaming || (!hooked && !externalOutputConnected()))
         if (offerInSwitcher) {
             playingPackage?.takeIf { it != packageName && airplayIds.isNotEmpty() }?.let { wanted[clientSessionId(it)] = it }
         }
@@ -167,7 +171,7 @@ class AirPlayRouteProviderService : MediaRoute2ProviderService() {
         if (streaming) {
             selected.forEach { b.addSelectedRoute(it); b.addDeselectableRoute(it) }
             all.filterNot { it in selected }.forEach { b.addSelectableRoute(it); b.addTransferableRoute(it) }
-            b.addTransferableRoute(PHONE_ROUTE)
+            if (!HookStatus.active()) b.addTransferableRoute(PHONE_ROUTE)
         } else {
             b.addSelectedRoute(PHONE_ROUTE)
             all.forEach { b.addTransferableRoute(it) }
@@ -194,6 +198,7 @@ class AirPlayRouteProviderService : MediaRoute2ProviderService() {
             putBundle("androidx.mediarouter.media.KEY_EXTRAS", Bundle())
         }
         return MediaRoute2Info.Builder(routeId(d), d.displayName)
+            .apply { if (android.os.Build.VERSION.SDK_INT >= 34) setType(MediaRoute2Info.TYPE_REMOTE_SPEAKER) }
             .setDescription(getString(R.string.route_description))
             .addFeature(MediaRoute2Info.FEATURE_LIVE_AUDIO)
             .setConnectionState(conn)

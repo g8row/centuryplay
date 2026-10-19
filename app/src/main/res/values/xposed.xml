@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="xposed_description">airplay speakers in the system output switcher and cast tile, like bluetooth and cast devices.</string>
+    <string-array name="xposed_scope">
+        <item>com.android.systemui</item>
+        <item>com.android.settings</item>
+        <item>com.airplay.streamer</item>
+    </string-array>
+</resources>

@@ -37,6 +37,12 @@
         android:usesCleartextTraffic="true"
         tools:targetApi="35">
 
+        <!-- LSPosed / Vector module (xposed/): speakers in the system output switcher and cast tile. -->
+        <meta-data android:name="xposedmodule" android:value="true" />
+        <meta-data android:name="xposeddescription" android:value="@string/xposed_description" />
+        <meta-data android:name="xposedminversion" android:value="82" />
+        <meta-data android:name="xposedscope" android:resource="@array/xposed_scope" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
