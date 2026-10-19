@@ -680,10 +680,19 @@ class AudioCaptureService : Service() {
         if (!prefs.volumeKeysControlSpeakers) return
         val am = getSystemService(AUDIO_SERVICE) as AudioManager
         val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
-        // Only needed when the phone is silenced by volume (projection capture); when audio
-        // is rerouted the keys reach our remote session and the phone index is left alone.
-        if (reroutedCapture || savedMusicVolume < 0) return
-        val baseline = 0
+        // Android 17 sends the keys to the music stream, not our remote session, while the
+        // music app itself is playing (MediaSessionService, b/432003816). Rerouted audio is
+        // recorded at full volume, so the phone index is free to serve as the key sensor.
+        val baseline = if (reroutedCapture) {
+            if (savedMusicVolume < 0) {
+                savedMusicVolume = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+                prefs.raw.edit().putInt(KEY_RESTORE_VOLUME, savedMusicVolume).apply()
+            }
+            (max / 2).also { runCatching { am.setStreamVolume(AudioManager.STREAM_MUSIC, it, 0) } }
+        } else {
+            if (savedMusicVolume < 0) return
+            0
+        }
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 if (intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", -1) != AudioManager.STREAM_MUSIC) return
