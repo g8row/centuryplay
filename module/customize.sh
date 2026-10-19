@@ -36,5 +36,9 @@ case "$out" in
     ui_print "! could not install the app now ($out); it is retried at boot" ;;
 esac
 
+# Module files show a fixed timestamp, so Android's package parse cache would keep using the
+# previous version's manifest (and its permissions) after an upgrade: drop that entry.
+rm -f /data/system/package_cache/*/CenturyPlay-* 2>/dev/null
+
 set_perm_recursive "$MODPATH/system" 0 0 0755 0644
 ui_print "- done. reboot, then open centuryplay: settings shows \"system mode\"."
