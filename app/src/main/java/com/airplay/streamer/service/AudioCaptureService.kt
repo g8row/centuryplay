@@ -849,7 +849,9 @@ class AudioCaptureService : Service() {
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                     )
                 )
-            mediaSession?.let {
+            // The session stays (it carries the volume keys), but without the media style it
+            // doesn't add a second player next to the music app's in the media controls.
+            mediaSession?.takeIf { prefs.streamPlayer }?.let {
                 builder.setStyle(
                     androidx.media.app.NotificationCompat.MediaStyle()
                         .setMediaSession(android.support.v4.media.session.MediaSessionCompat.Token.fromToken(it.session.sessionToken))

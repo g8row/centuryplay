@@ -30,6 +30,14 @@ class Prefs(context: Context) {
         get() = raw.getBoolean("silence_phone", true)
         set(v) = raw.edit().putBoolean("silence_phone", v).apply()
 
+    /**
+     * Show the stream as its own player in the media controls. Off: the music app's player is the
+     * only one (its output chip shows the speakers); the stream notification is a plain one.
+     */
+    var streamPlayer: Boolean
+        get() = raw.getBoolean("stream_player", false)
+        set(v) = raw.edit().putBoolean("stream_player", v).apply()
+
     /** Hardware volume keys control the speakers while streaming. */
     var volumeKeysControlSpeakers: Boolean
         get() = raw.getBoolean("volume_keys_speakers", true)

@@ -85,6 +85,7 @@ class SettingsActivity : AppCompatActivity() {
         switch("auto-play on my speakers", "when music starts on the phone and your last speakers are on the wi-fi, stream there automatically. needs shizuku (or a held capture permission); skipped when headphones are connected.", prefs.autoPlay) { prefs.autoPlay = it }
         switch("reconnect on launch", "when the app opens, reconnect to the speakers you used last.", prefs.autoConnect) { prefs.autoConnect = it }
         switch("keep screen on while streaming", "only while the app is open.", prefs.keepScreenOn) { prefs.keepScreenOn = it }
+        switch("separate player in media controls", "show the stream as its own player next to the music app's. off: the music app's player shows the speakers as its output.", prefs.streamPlayer) { prefs.streamPlayer = it }
         switch("now playing card", "show the current track and playback controls in the app.", prefs.showNowPlaying) { prefs.showNowPlaying = it }
 
         section("system integration")
