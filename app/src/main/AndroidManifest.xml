@@ -25,6 +25,7 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_ROUTING" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.CAPTURE_AUDIO_OUTPUT" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.MEDIA_CONTENT_CONTROL" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.REMOTE_DISPLAY_PROVIDER" tools:ignore="ProtectedPermissions" />
 
     <application
         android:allowBackup="true"
@@ -36,6 +37,8 @@
         android:theme="@style/Theme.AirPlayStreamer"
         android:usesCleartextTraffic="true"
         tools:targetApi="35">
+
+        <uses-library android:name="com.android.media.remotedisplay" android:required="false" />
 
         <!-- LSPosed / Vector module (xposed/): speakers in the system output switcher and cast tile. -->
         <meta-data android:name="xposedmodule" android:value="true" />
@@ -99,6 +102,17 @@
             android:permission="android.permission.BIND_ROUTE_PROVIDER">
             <intent-filter>
                 <action android:name="android.media.MediaRoute2ProviderService" />
+            </intent-filter>
+        </service>
+
+        <!-- Speakers in the system cast tile / Settings → Cast (system app only, see the class) -->
+        <service
+            android:name=".router.AirPlayCastProviderService"
+            android:exported="true"
+            android:permission="android.permission.BIND_REMOTE_DISPLAY"
+            tools:ignore="ProtectedPermissions">
+            <intent-filter>
+                <action android:name="com.android.media.remotedisplay.RemoteDisplayProvider" />
             </intent-filter>
         </service>
 

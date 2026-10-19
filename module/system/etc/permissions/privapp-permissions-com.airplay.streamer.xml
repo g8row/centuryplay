@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- centuryplay as a privileged app: capture by rerouting audio (AudioPolicy loopback),
-     read media sessions without notification access. -->
+     read media sessions without notification access, list speakers in the cast tile. -->
 <permissions>
     <privapp-permissions package="com.airplay.streamer">
         <permission name="android.permission.MODIFY_AUDIO_ROUTING" />
         <permission name="android.permission.CAPTURE_AUDIO_OUTPUT" />
         <permission name="android.permission.MEDIA_CONTENT_CONTROL" />
+        <permission name="android.permission.REMOTE_DISPLAY_PROVIDER" />
     </privapp-permissions>
 </permissions>

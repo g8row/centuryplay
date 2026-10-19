@@ -110,6 +110,9 @@ dependencies {
     // LSPosed / Vector module API, provided by the framework at runtime.
     compileOnly("de.robv.android.xposed:api:82")
 
+    // Platform remote display library (cast tile), provided by the device via <uses-library>.
+    compileOnly(project(":remotedisplay-stubs"))
+
     // Unit testing
     testImplementation("junit:junit:4.13.2")
 }
