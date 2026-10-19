@@ -655,17 +655,27 @@ class AudioCaptureService : Service() {
     /**
      * Fallback for volume keys that reach the phone's music stream instead of our remote
      * session (e.g. while an app forces the music stream): each step is applied to the
-     * speakers and the phone index is returned to a near-silent baseline (index 1
-     * for 50+ step TVs, 0 otherwise). The original phone volume is restored afterward.
+     * speakers and the phone index is returned to its baseline: mid-scale when audio is
+     * rerouted, otherwise near-silent (index 1 for 50+ step TVs, 0 otherwise). The original
+     * phone volume is restored afterward.
      */
     private fun registerVolumeReceiver(s: StreamSession) {
         if (!prefs.volumeKeysControlSpeakers) return
         val am = getSystemService(AUDIO_SERVICE) as AudioManager
         val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
-        // Only needed when the phone is silenced by volume (projection capture); when audio
-        // is rerouted the keys reach our remote session and the phone index is left alone.
-        if (reroutedCapture || savedMusicVolume < 0) return
-        val baseline = VolumeKeyPolicy.parkedIndex(max)
+        // Android 17 sends the keys to the music stream, not our remote session, while the
+        // music app itself is playing (MediaSessionService, b/432003816). Rerouted audio is
+        // recorded at full volume, so the phone index is free to serve as the key sensor.
+        val baseline = if (reroutedCapture) {
+            if (savedMusicVolume < 0) {
+                savedMusicVolume = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+                prefs.raw.edit().putInt(KEY_RESTORE_VOLUME, savedMusicVolume).apply()
+            }
+            (max / 2).also { runCatching { am.setStreamVolume(AudioManager.STREAM_MUSIC, it, 0) } }
+        } else {
+            if (savedMusicVolume < 0) return
+            VolumeKeyPolicy.parkedIndex(max)
+        }
         var lastDirection = 0
         var lastAt = 0L
         val receiver = object : BroadcastReceiver() {
