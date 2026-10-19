@@ -1,0 +1,7 @@
+id=centuryplay
+name=centuryplay system mode
+version=@VERSION@
+versionCode=@VERSION_CODE@
+author=g8row
+description=installs centuryplay as a privileged system app: airplay with no capture prompt and no shizuku, the phone speaker fully bypassed, every app's audio (apple music too). enable it in lsposed/vector for the cast tile and output switcher integration.
+updateJson=https://raw.githubusercontent.com/g8row/centuryplay/master/module/update.json

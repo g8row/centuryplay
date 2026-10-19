@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<config>
+    <!-- AudioPolicy is a @SystemApi reached through reflection. -->
+    <hidden-api-whitelisted-app package="com.airplay.streamer" />
+    <!-- Streams must not be cut by doze or app standby. -->
+    <allow-in-power-save package="com.airplay.streamer" />
+</config>
