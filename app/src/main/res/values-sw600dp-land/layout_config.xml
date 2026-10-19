@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tablets in landscape: a permanent player pane next to the speakers (layout-sw600dp-land). -->
+<resources>
+    <bool name="tablet_pane">true</bool>
+</resources>
