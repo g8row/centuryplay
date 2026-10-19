@@ -21,6 +21,8 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags += "-std=c++17"
+                // 16 KB page devices (Android 15+): align the ELF segments.
+                arguments += "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
             }
         }
     }
@@ -55,6 +57,12 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+    }
+
+    // AGP 8.2 aligns uncompressed .so files to 4 KB inside the APK, which 16 KB page devices
+    // flag; ship them compressed (extracted at install) instead.
+    packaging {
+        jniLibs.useLegacyPackaging = true
     }
 
     buildFeatures {

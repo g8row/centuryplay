@@ -31,13 +31,18 @@ object StreamController {
         return ShizukuManager.status.value == ShizukuManager.Status.READY
     }
 
-    fun hasRuntimePermissions(context: Context): Boolean {
-        val needed = buildList {
-            add(Manifest.permission.RECORD_AUDIO)
-            if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-        return needed.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
-    }
+    /** Runtime permissions the app asks for up front. */
+    fun runtimePermissions(): Array<String> = buildList {
+        add(Manifest.permission.RECORD_AUDIO)
+        if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+        // Android 17 local network protection: without it mDNS discovery fails (NSD error 7).
+        if (Build.VERSION.SDK_INT >= 37) add(ACCESS_LOCAL_NETWORK)
+    }.toTypedArray()
+
+    fun hasRuntimePermissions(context: Context): Boolean =
+        runtimePermissions().all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
+
+    private const val ACCESS_LOCAL_NETWORK = "android.permission.ACCESS_LOCAL_NETWORK"
 
     /** Connects [device], adding it to the current session (multi-room) if one is running. */
     fun connect(context: Context, device: AirPlayDevice) {
