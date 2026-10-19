@@ -55,6 +55,7 @@ class MainActivity : AppCompatActivity() {
     private var lastSession = SessionState()
     private var lastMedia = MediaInfoTracker.MediaInfo()
     private val endDrag = Runnable { groupDragging = false }
+    private val tabletPane by lazy { resources.getBoolean(R.bool.tablet_pane) }
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
         if (results[Prefs.LOCAL_NETWORK] == true) viewModel.refreshDiscovery()
@@ -73,6 +74,7 @@ class MainActivity : AppCompatActivity() {
 
         setupInsets()
         setupList()
+        if (tabletPane) renderNowPlaying(lastMedia)
         setupControls()
         observe()
         // Without this Android 17+ hides every speaker: ask right away. With Shizuku installed
@@ -125,7 +127,9 @@ class MainActivity : AppCompatActivity() {
             onLongClick = ::showSpeakerDetails,
             onVolume = { row, v -> StreamController.setSpeakerVolume(row.device.identity, v) },
         )
-        binding.speakersRecyclerView.layoutManager = LinearLayoutManager(this)
+        val columns = resources.getInteger(R.integer.speaker_columns)
+        binding.speakersRecyclerView.layoutManager =
+            if (columns > 1) androidx.recyclerview.widget.GridLayoutManager(this, columns) else LinearLayoutManager(this)
         binding.speakersRecyclerView.adapter = adapter
         binding.speakersRecyclerView.itemAnimator?.changeDuration = 120
     }
@@ -350,7 +354,8 @@ class MainActivity : AppCompatActivity() {
         val streaming = session.capturing && session.speakers.isNotEmpty()
         val mediaVisible = prefs.showNowPlaying && MediaInfoTracker.hasNotificationAccess(this) &&
             (lastMedia.hasContent || streaming)
-        val show = streaming || mediaVisible
+        // Tablets in landscape keep the player pane, so the speakers grid doesn't jump around.
+        val show = streaming || mediaVisible || tabletPane
         if ((binding.controlsCard.visibility == View.VISIBLE) != show) {
             androidx.transition.TransitionManager.beginDelayedTransition(
                 binding.mainContent,
@@ -360,7 +365,7 @@ class MainActivity : AppCompatActivity() {
             binding.controlsCard.visibility = if (show) View.VISIBLE else View.GONE
             ViewCompat.requestApplyInsets(binding.speakersRecyclerView)
         }
-        binding.nowPlayingLayout.visibility = if (mediaVisible) View.VISIBLE else View.GONE
+        binding.nowPlayingLayout.visibility = if (mediaVisible || tabletPane) View.VISIBLE else View.GONE
         binding.streamingRow.visibility = if (streaming) View.VISIBLE else View.GONE
         binding.groupVolumeLayout.visibility = if (streaming) View.VISIBLE else View.GONE
         if (!streaming) return
@@ -390,11 +395,12 @@ class MainActivity : AppCompatActivity() {
         binding.playPauseButton.setImageResource(if (info.isPlaying) R.drawable.ic_pause else R.drawable.ic_play)
         if (info.albumArt != null) {
             binding.albumArt.imageTintList = null
-            binding.albumArt.setPadding(0, 0, 0, 0)
+            binding.albumArt.setContentPadding(0, 0, 0, 0)
             binding.albumArt.setImageBitmap(info.albumArt)
         } else {
             binding.albumArt.setImageResource(R.drawable.ic_music_note)
-            binding.albumArt.setPadding(dp(14), dp(14), dp(14), dp(14))
+            val pad = dp(14)
+            binding.albumArt.setContentPadding(pad, pad, pad, pad)
             binding.albumArt.imageTintList = ColorStateList.valueOf(
                 MaterialColors.getColor(binding.albumArt, com.google.android.material.R.attr.colorOnSecondaryContainer)
             )
