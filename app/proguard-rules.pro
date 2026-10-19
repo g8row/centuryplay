@@ -14,3 +14,8 @@
 # Keep jmDNS
 -keep class javax.jmdns.** { *; }
 -dontwarn javax.jmdns.**
+
+# Provided at runtime by the device: LSPosed / Vector (xposed/) and the platform's remote
+# display library (router/AirPlayCastProviderService).
+-dontwarn de.robv.android.xposed.**
+-dontwarn com.android.media.remotedisplay.**

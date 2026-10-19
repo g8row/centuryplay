@@ -13,6 +13,12 @@ Main areas (v2 engine, see `docs/RESEARCH_AND_ROADMAP.md` for design + verified 
 - `service/`: `AudioCaptureService` (FGS, capture source, OS integration), `StreamController` (entry point), `StreamMediaSession` (remote volume), tile.
 - `shizuku/`: optional privileged helper (one-tap permission grants, AudioPolicy reroute capture).
 - `router/`: MediaRoute2 provider (output switcher, and the routing session that lets volume keys reach our session).
+- `router/AirPlayCastProviderService.kt`: remote display provider (cast tile, Settings → Cast); only bound when privileged.
+- `system/`: system mode (`SystemMode`, `PolicyCapture` — in-process AudioPolicy reroute when installed as a privileged app) and `HookStatus`.
+- `xposed/`: LSPosed / Vector hooks on SettingsLib in System UI and Settings (output switcher); entry in `assets/xposed_init`.
+- `module/` + `tools/build_module.sh`: the Magisk / KernelSU / APatch module (privileged install, privapp permissions, hidden-API allowlist).
+- `remotedisplay-stubs/`: compile-only stubs of the platform's `com.android.media.remotedisplay` library.
+- `tools/release.sh <keystore>`: signed APK + module zip (must be the release key, see docs/SYSTEM_INTEGRATION.md).
 - `docs/`: protocol notes, research and roadmap.
 - `tools/collect_macos_airplay_logs.sh`: helper for collecting macOS AirPlay logs while capturing a reproduction.
 

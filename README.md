@@ -17,6 +17,14 @@ stream audio from your android device to airplay speakers.
   <p><i>main interface • active streaming • settings</i></p>
 </div>
 
+<div align="center">
+  <img src="images/tablet.png" width="680" />
+  <p><i>tablet layout</i></p>
+  <img src="images/output-switcher.png" width="300" />
+  <img src="images/cast-tile.png" width="300" />
+  <p><i>system mode: the media output switcher and the cast tile</i></p>
+</div>
+
 ## the story
 
 started as a way to breathe new life into a bang & olufsen beosound century - a beautiful 1990s hi-fi system with stunning sound quality but no wireless capabilities. by adding a raspberry pi running [shairport-sync](https://github.com/mikebrady/shairport-sync), the century can now receive airplay streams.
@@ -27,6 +35,10 @@ centuryplay completes the chain by letting android devices stream system audio t
 
 - **one tap to play**: tap a speaker and your phone's audio plays there. tap more speakers for multi-room, each with its own volume.
 - **in the system output switcher**: your airplay speakers show up in the media controls' output picker of any app, next to bluetooth devices.
+- **system mode** (root module or a rom that ships it): no capture prompt, no shizuku, phone speaker bypassed — and **apple music works**.
+- **in the cast tile**: as a system app, the speakers are listed in the quick settings cast tile and settings → cast, like chromecasts.
+- **lsposed / vector**: the output switcher treats the speakers like cast devices — the media card says "playing on century", the speakers sit next to bluetooth and headphones, and there's one player, not two.
+- **tablet layout**: speakers in a grid next to a full-height player.
 - **volume buttons control the speakers**, and the system volume panel slider follows them.
 - **phone stays silent** while streaming.
 - **auto-play on my speakers** (optional): music starts at home → it plays on your usual speakers by itself.
@@ -37,14 +49,18 @@ centuryplay completes the chain by letting android devices stream system audio t
 - **remote control from the speaker side** (dacp): receiver remotes can play/pause/skip and change volume.
 - **recent groups**: one tap brings back "living room + kitchen".
 - **per-speaker audio delay** to line up speakers or match video, and an option to keep game sounds on the phone.
-- **optional shizuku mode**: one-tap setup that removes every permission prompt and bypasses the phone speaker completely.
+- **optional shizuku mode**: one-tap setup that removes every permission prompt and bypasses the phone speaker completely (no root needed).
 
 ## lossless & hi-res audio
 
 ### does it work with apple music?
 
-no — apple music on android only allows its audio to be captured by the system itself, and android restricts that
-kind of capture to 16 khz mono. most other apps (e.g. spotify, youtube music, vlc, podcast apps, browsers) work; the app tells you when one blocks capture.
+with system mode or shizuku, yes. apple music only lets the system capture its audio, and the normal capture api (and
+android's own "capture by system" mode, limited to 16 khz mono) skips it. system mode and shizuku don't capture a copy: they
+*reroute* media audio through an audio policy, and rerouting includes apple music at full quality (verified on android 17).
+
+with the plain capture prompt, most other apps (e.g. spotify, youtube music, vlc, podcast apps, browsers) work; the app tells
+you when one blocks capture.
 
 ### android audio resampling
 
@@ -75,6 +91,7 @@ bottom line: excellent quality, but not bit-perfect hi-res. cd quality (16-bit/4
 ## requirements
 
 - android 11 (api 30) or higher. android 13+ for shizuku capture.
+- optional: root (magisk, kernelsu or apatch) for system mode; lsposed or vector on top for the output switcher integration.
 - airplay-compatible receiver (e.g. shairport-sync, airport express, homepod, apple tv, sonos, macs).
 - optional: [shizuku](https://shizuku.rikka.app/) for the no-prompt, silent-phone experience.
 
@@ -100,7 +117,10 @@ bottom line: excellent quality, but not bit-perfect hi-res. cd quality (16-bit/4
 
 ### from release
 
-download `centuryplay-v2.0.apk` from the [latest release](https://github.com/g8row/centuryplay/releases/latest). it installs over v1.x.
+download `centuryplay-v2.1.apk` from the [latest release](https://github.com/g8row/centuryplay/releases/latest). it installs over v1.x and v2.0.
+
+rooted? flash `centuryplay-module-v2.1.zip` instead (magisk, kernelsu, apatch) and reboot: it installs the same app as a
+privileged system app (see system mode below). it updates over the plain apk and keeps your speakers and settings.
 every push to master also builds a debug apk (actions → build → artifacts).
 
 ## usage
@@ -114,6 +134,22 @@ every push to master also builds a debug apk (actions → build → artifacts).
 install and start [shizuku](https://shizuku.rikka.app/), then tap "set up" on the card in centuryplay. it grants, once:
 the screen-capture approval (no more prompt), notification access (track info), battery exemption, and lets centuryplay
 *reroute* media audio instead of copying it — the phone speaker is bypassed and nothing shows the "casting" indicator.
+
+### system mode (root module)
+
+as a privileged system app centuryplay holds android's audio routing permission, so it reroutes media audio itself:
+no capture prompt, no shizuku, no screen-sharing indicator, the phone speaker is bypassed and apps that only allow
+capture by the system (apple music) are streamed too. it also reads what's playing without notification access, and
+publishes the speakers to the cast tile. settings → system mode shows whether it's active. the module also grants the
+microphone/notification/local-network permissions once, so there are no prompts at all.
+
+### lsposed / vector
+
+enable centuryplay in lsposed or vector (scope: system ui, settings, centuryplay — preselected) and restart system ui.
+the media output switcher then works like casting: pick a speaker in any app's output picker (also with bluetooth or
+headphones connected, or with nothing playing), the media card shows "playing on century", the dialog shows the speaker
+with its volume, other speakers become multi-room checkboxes, and "stop casting" or "this phone" ends the stream.
+the hooks only touch settingslib's media output code; without them the app falls back to its own switcher integration.
 
 ## how it works
 
@@ -129,7 +165,8 @@ uses android's `audioplaybackcapture` api to capture system audio, then streams 
 
 ### technical details
 
-- capture: mediaprojection playback capture, or an audiopolicy loopback mix via shizuku (shell user).
+- capture: mediaprojection playback capture, or an audiopolicy loopback mix — in-process as a system app, or via shizuku (shell user).
+- system integration: mediaroute2 provider (output switcher), remote display provider (cast tile), lsposed hooks on settingslib.
 - audio: alac (apple's reference encoder via jni) or l16, 352 frames per packet, 44.1 khz stereo.
 - transport: rtp over udp; rtsp control; lost packets resent from an ~8 s backlog.
 - timing: ntp-style timing + sync packets derived from the capture clock (no drift), shared by all speakers (multi-room).
@@ -153,11 +190,20 @@ see [docs/airplay_protocol.md](docs/AIRPLAY_PROTOCOL.md) for detailed protocol d
 
 ## limitations
 
-- some apps block audio capture (netflix, apple music on android) — centuryplay tells you when that happens.
+- some apps block the plain capture prompt (netflix, apple music) — system mode and shizuku reroute them anyway; centuryplay tells you when capture is blocked.
 - latency: ~2 s by default (adjustable 0.5–4 s); use the per-speaker audio delay to line up speakers or video.
 - fairplay-only receivers can't be supported.
 
 ## changelog
+
+### v2.1 (october 2026)
+- system mode: a root module installs centuryplay as a privileged system app — no prompts, no shizuku, apple music works.
+- cast tile: the speakers appear in the quick settings cast tile and settings → cast (system mode).
+- lsposed / vector module: the output switcher treats the speakers like cast devices (active device, volume, multi-room, next to bluetooth).
+- one player in the media controls instead of two (the stream's own player is optional now).
+- volume buttons work again on android 17 while the music app plays.
+- tablet layout: speaker grid and a full-height player.
+- android 17: asks for the local network permission (speakers weren't found); 16 kb page size compatible.
 
 ### v2.0 (september 2026)
 - new streaming engine: alac, resends, drift-free sync, multi-room, auto-reconnect, metadata + artwork.
