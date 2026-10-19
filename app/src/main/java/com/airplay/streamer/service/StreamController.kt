@@ -9,6 +9,7 @@ import androidx.core.content.ContextCompat
 import com.airplay.streamer.discovery.AirPlayDevice
 import com.airplay.streamer.router.MediaProjectionConsentActivity
 import com.airplay.streamer.shizuku.ShizukuManager
+import com.airplay.streamer.system.SystemMode
 import com.airplay.streamer.util.LogServer
 import com.airplay.streamer.util.Prefs
 
@@ -20,6 +21,7 @@ object StreamController {
         if (!hasRuntimePermissions(context)) return false
         if (AudioCaptureService.hasActiveProjection) return true
         if (AudioCaptureService.state.value.capturing) return true
+        if (SystemMode.canReroute(context)) return true
         return shizukuCaptureAvailable(context)
     }
 

@@ -7,32 +7,29 @@ import android.content.AttributionSource
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ApplicationInfo
-import android.media.AudioAttributes
-import android.media.AudioFormat
-import android.media.AudioManager
 import android.media.AudioRecord
 import android.os.Binder
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.os.Process
 import android.util.Log
+import com.airplay.streamer.system.PolicyCapture
 import java.io.FileOutputStream
 import kotlin.concurrent.thread
 import kotlin.system.exitProcess
 
 /**
  * Shizuku UserService: runs inside a separate process as the **shell** user (uid 2000),
- * which holds MODIFY_AUDIO_ROUTING / CAPTURE_AUDIO_OUTPUT. That lets us register an
- * AudioPolicy loopback mix — the same technique scrcpy uses for `--audio-source=playback`
- * (scrcpy AudioPlaybackCapture.java, Apache 2.0) — so media audio can be *rerouted* to
- * the AirPlay stream (phone speaker silent) without any MediaProjection consent.
+ * which holds MODIFY_AUDIO_ROUTING / CAPTURE_AUDIO_OUTPUT. That lets it run [PolicyCapture],
+ * so media audio can be *rerouted* to the AirPlay stream (phone speaker silent) without any
+ * MediaProjection consent.
  *
  * Everything here is reflection on hidden APIs; the process is app_process, so hidden
  * API restrictions don't apply. Must keep a public no-arg constructor for Shizuku.
  */
 class PrivilegedService : IPrivilegedService.Stub() {
 
-    private var policy: Any? = null
+    private val policyCapture by lazy { PolicyCapture(ShellContext.get()) }
     private var record: AudioRecord? = null
     @Volatile private var capturing = false
     private var pumpThread: Thread? = null
@@ -66,13 +63,7 @@ class PrivilegedService : IPrivilegedService.Stub() {
         // clear it so the check runs against this process (shell).
         val token = Binder.clearCallingIdentity()
         val rec = try {
-            createPolicyRecord(keepLocalPlayback)
-        } catch (e: Throwable) {
-            policy?.let { unregisterPolicy(it) }
-            policy = null
-            val cause = (e as? java.lang.reflect.InvocationTargetException)?.targetException ?: e
-            Log.e(TAG, "audio policy capture failed", cause)
-            throw IllegalStateException("audio policy capture failed: ${cause.javaClass.simpleName}: ${cause.message}", cause)
+            policyCapture.start(keepLocalPlayback, captureUsages)
         } finally {
             Binder.restoreCallingIdentity(token)
         }
@@ -107,76 +98,7 @@ class PrivilegedService : IPrivilegedService.Stub() {
         capturing = false
         record?.let { r -> runCatching { r.stop() }; runCatching { r.release() } }
         record = null
-        policy?.let { unregisterPolicy(it) }
-        policy = null
-    }
-
-    @SuppressLint("PrivateApi", "DiscouragedPrivateApi")
-    private fun createPolicyRecord(keepLocal: Boolean): AudioRecord {
-        val ruleClass = Class.forName("android.media.audiopolicy.AudioMixingRule")
-        val ruleBuilderClass = Class.forName("android.media.audiopolicy.AudioMixingRule\$Builder")
-        val ruleBuilder = ruleBuilderClass.getConstructor().newInstance()
-        ruleBuilderClass.getMethod("setTargetMixRole", Int::class.javaPrimitiveType)
-            .invoke(ruleBuilder, ruleClass.getField("MIX_ROLE_PLAYERS").getInt(null))
-        val matchUsage = ruleClass.getField("RULE_MATCH_ATTRIBUTE_USAGE").getInt(null)
-        val addRule = ruleBuilderClass.getMethod("addMixRule", Int::class.javaPrimitiveType, Any::class.java)
-        for (usage in captureUsages) {
-            addRule.invoke(ruleBuilder, matchUsage, AudioAttributes.Builder().setUsage(usage).build())
-        }
-        // Note: allowPrivilegedPlaybackCapture(true) would include apps that only allow
-        // capture "by system" (Apple Music), but AudioService only permits it for <=16 kHz
-        // mono mixes (AudioMix.canBeUsedForPrivilegedMediaCapture) — useless for music.
-        val rule = ruleBuilderClass.getMethod("build").invoke(ruleBuilder)
-
-        val mixClass = Class.forName("android.media.audiopolicy.AudioMix")
-        val mixBuilderClass = Class.forName("android.media.audiopolicy.AudioMix\$Builder")
-        val mixBuilder = mixBuilderClass.getConstructor(ruleClass).newInstance(rule)
-        mixBuilderClass.getMethod("setFormat", AudioFormat::class.java).invoke(mixBuilder, FORMAT)
-        val flagName = if (keepLocal) "ROUTE_FLAG_LOOP_BACK_RENDER" else "ROUTE_FLAG_LOOP_BACK"
-        mixBuilderClass.getMethod("setRouteFlags", Int::class.javaPrimitiveType)
-            .invoke(mixBuilder, mixClass.getField(flagName).getInt(null))
-        val mix = mixBuilderClass.getMethod("build").invoke(mixBuilder)
-
-        val policyClass = Class.forName("android.media.audiopolicy.AudioPolicy")
-        val policyBuilderClass = Class.forName("android.media.audiopolicy.AudioPolicy\$Builder")
-        val policyBuilder = policyBuilderClass.getConstructor(Context::class.java).newInstance(ShellContext.get())
-        policyBuilderClass.getMethod("addMix", mixClass).invoke(policyBuilder, mix)
-        val newPolicy = policyBuilderClass.getMethod("build").invoke(policyBuilder)!!
-
-        val register = AudioManager::class.java.getDeclaredMethod("registerAudioPolicyStatic", policyClass)
-        register.isAccessible = true
-        val result = register.invoke(null, newPolicy) as Int
-        if (result != 0) throw IllegalStateException("registerAudioPolicy returned $result")
-        policy = newPolicy
-
-        return policyClass.getMethod("createAudioRecordSink", mixClass).invoke(newPolicy, mix) as AudioRecord?
-            ?: throw IllegalStateException("createAudioRecordSink returned null")
-    }
-
-    @SuppressLint("PrivateApi", "DiscouragedPrivateApi", "SoonBlockedPrivateApi", "BlockedPrivateApi")
-    private fun unregisterPolicy(p: Any) {
-        val policyClass = Class.forName("android.media.audiopolicy.AudioPolicy")
-        try {
-            val m = AudioManager::class.java.getDeclaredMethod("unregisterAudioPolicyAsyncStatic", policyClass)
-            m.isAccessible = true
-            m.invoke(null, p)
-            return
-        } catch (_: NoSuchMethodException) {
-        } catch (e: Exception) {
-            Log.w(TAG, "unregisterAudioPolicyAsyncStatic failed: ${e.message}")
-        }
-        try {
-            // Fallback: IAudioService.unregisterAudioPolicyAsync(policy.cb())
-            val sm = Class.forName("android.os.ServiceManager")
-            val binder = sm.getMethod("getService", String::class.java).invoke(null, Context.AUDIO_SERVICE)
-            val stub = Class.forName("android.media.IAudioService\$Stub")
-            val service = stub.getMethod("asInterface", android.os.IBinder::class.java).invoke(null, binder)
-            val cb = policyClass.getDeclaredMethod("cb").apply { isAccessible = true }.invoke(p)
-            val cbClass = Class.forName("android.media.audiopolicy.IAudioPolicyCallback")
-            service!!.javaClass.getMethod("unregisterAudioPolicyAsync", cbClass).invoke(service, cb)
-        } catch (e: Exception) {
-            Log.w(TAG, "could not unregister audio policy: ${e.message}")
-        }
+        policyCapture.stop()
     }
 
     /**
@@ -240,11 +162,6 @@ class PrivilegedService : IPrivilegedService.Stub() {
         const val VERSION = 5
         private const val TAG = "centuryplay-priv"
         private const val BUFFER_BYTES = 352 * 4 * 2
-        private val CAPTURED_USAGES = intArrayOf(AudioAttributes.USAGE_MEDIA, AudioAttributes.USAGE_GAME, AudioAttributes.USAGE_UNKNOWN)
-        private val FORMAT: AudioFormat = AudioFormat.Builder()
-            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-            .setSampleRate(44100)
-            .setChannelMask(AudioFormat.CHANNEL_IN_STEREO)
-            .build()
+        private val CAPTURED_USAGES = PolicyCapture.DEFAULT_USAGES
     }
 }

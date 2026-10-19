@@ -43,6 +43,8 @@ import com.airplay.streamer.engine.StreamPcmSource
 import com.airplay.streamer.engine.StreamSession
 import com.airplay.streamer.engine.TrackMetadata
 import com.airplay.streamer.shizuku.ShizukuManager
+import com.airplay.streamer.system.PolicyCapture
+import com.airplay.streamer.system.SystemMode
 import com.airplay.streamer.util.LogServer
 import com.airplay.streamer.util.Prefs
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -69,6 +71,7 @@ import java.io.ByteArrayOutputStream
  * streams it to one or more AirPlay speakers.
  *
  * Capture source, in order of preference:
+ *  0. System app (root module or ROM): the same AudioPolicy loopback, in-process.
  *  1. Shizuku (shell-user AudioPolicy loopback): no consent dialog, phone speaker silent.
  *  2. MediaProjection playback capture: needs a one-time consent (skipped when the
  *     PROJECT_MEDIA app-op is pre-approved, e.g. by Shizuku setup); the projection token is
@@ -280,7 +283,7 @@ class AudioCaptureService : Service() {
         standbyJob?.cancel()
         stopJob?.join()
         val source = openSource() ?: run {
-            LogServer.log("No capture source available (need consent or Shizuku)")
+            LogServer.log("No capture source available (need consent, Shizuku or system mode)")
             pendingConsentDevice?.let { device ->
                 // Shizuku capture failed and there's no projection yet: ask for consent
                 // (allowed while our UI is in front; otherwise the alert explains).
@@ -326,6 +329,23 @@ class AudioCaptureService : Service() {
     }
 
     private suspend fun openSource(): PcmSource? {
+        if (SystemMode.canReroute(this)) {
+            val keepLocal = !prefs.silencePhone
+            try {
+                val capture = PolicyCapture(applicationContext)
+                val record = capture.start(keepLocal, prefs.captureUsages)
+                reroutedCapture = !keepLocal
+                return object : PcmSource by AudioRecordSource(record, "system ${if (keepLocal) "capture" else "reroute"}") {
+                    override fun stop() {
+                        runCatching { record.stop() }
+                        runCatching { record.release() }
+                        capture.stop()
+                    }
+                }
+            } catch (e: Exception) {
+                LogServer.log("System capture failed, trying the other sources: ${e.message}")
+            }
+        }
         if (prefs.useShizukuCapture && Build.VERSION.SDK_INT >= 33) {
             val svc = ShizukuManager.awaitPrivileged(1500)
             if (svc != null) {

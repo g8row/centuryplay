@@ -175,6 +175,7 @@ class MediaInfoTracker(private val context: Context) {
 
     companion object {
         fun hasNotificationAccess(context: Context): Boolean {
+            if (com.airplay.streamer.system.SystemMode.canReadSessions(context)) return true
             val flat = android.provider.Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
             return flat?.contains(ComponentName(context, NotificationListener::class.java).flattenToString()) == true
         }

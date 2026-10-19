@@ -32,6 +32,7 @@ import com.airplay.streamer.service.AudioCaptureService
 import com.airplay.streamer.service.MediaInfoTracker
 import com.airplay.streamer.service.StreamController
 import com.airplay.streamer.shizuku.ShizukuManager
+import com.airplay.streamer.system.SystemMode
 import com.airplay.streamer.ui.MainViewModel
 import com.airplay.streamer.ui.SpeakerAdapter
 import com.airplay.streamer.ui.SpeakerRow
@@ -408,7 +409,7 @@ class MainActivity : AppCompatActivity() {
             shizuku == ShizukuManager.Status.READY && (needsProjectionApproval || !hasListener || !StreamController.hasRuntimePermissions(this)) -> Setup.SHIZUKU_SETUP
             !StreamController.hasRuntimePermissions(this) -> Setup.PERMISSIONS
             !hasListener && prefs.showNowPlaying -> Setup.NOTIFICATION_ACCESS
-            shizuku == ShizukuManager.Status.NOT_INSTALLED && needsProjectionApproval &&
+            shizuku == ShizukuManager.Status.NOT_INSTALLED && needsProjectionApproval && !SystemMode.canReroute(this) &&
                 !prefs.raw.getBoolean("shizuku_tip_dismissed", false) -> Setup.SHIZUKU_TIP
             else -> null
         }

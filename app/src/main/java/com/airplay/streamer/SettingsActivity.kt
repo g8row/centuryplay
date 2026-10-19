@@ -20,6 +20,7 @@ import androidx.core.view.updatePadding
 import androidx.lifecycle.lifecycleScope
 import com.airplay.streamer.service.MediaInfoTracker
 import com.airplay.streamer.shizuku.ShizukuManager
+import com.airplay.streamer.system.SystemMode
 import com.airplay.streamer.util.LogServer
 import com.airplay.streamer.util.Prefs
 import com.google.android.material.appbar.MaterialToolbar
@@ -88,23 +89,13 @@ class SettingsActivity : AppCompatActivity() {
 
         section("system integration")
         switch("speakers in the system output switcher", "your airplay speakers appear in the media controls' output picker of any app, like bluetooth devices. hidden while headphones are connected.", prefs.systemSwitcher) { prefs.systemSwitcher = it }
-        action("shizuku", { shizukuSummary() }) { onShizukuClicked() }
-        action("skip the capture prompt without shizuku", {
-            if (ShizukuManager.projectionPreApproved(this)) "done — android won't ask again"
-            else "one adb command from a computer, once"
+        action("system mode", {
+            if (SystemMode.canReroute(this)) SystemMode.describe(this)
+            else "${SystemMode.describe(this)} — rooted? the centuryplay module installs it as a system app: no prompts, no shizuku"
         }) {
-            val cmd = "adb shell appops set $packageName PROJECT_MEDIA allow"
-            MaterialAlertDialogBuilder(this)
-                .setTitle("skip the capture prompt")
-                .setMessage("connect the phone to a computer with usb debugging on and run:\n\n$cmd\n\nandroid will then allow audio capture without asking (it survives reboots, not reinstalls).")
-                .setPositiveButton("copy") { _, _ ->
-                    val cm = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                    cm.setPrimaryClip(android.content.ClipData.newPlainText("adb", cmd))
-                }
-                .setNegativeButton(R.string.cancel, null)
-                .show()
+            if (!SystemMode.canReroute(this)) startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/g8row/centuryplay/releases/latest")))
         }
-        switch("capture through shizuku", "no screen-capture permission, and the phone speaker is fully bypassed (android 13+).", prefs.useShizukuCapture) { prefs.useShizukuCapture = it }
+        if (!SystemMode.canReroute(this)) shizukuSettings()
         action("track info access", {
             if (MediaInfoTracker.hasNotificationAccess(this)) "allowed — speakers can show what's playing" else "not allowed — tap to allow notification access"
         }) { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
@@ -139,7 +130,7 @@ class SettingsActivity : AppCompatActivity() {
         action("name on speakers", { prefs.senderName }) { editSenderName() }
         action("share debug log", { "attach this to a github issue if something doesn't work" }) {
             val header = "centuryplay ${BuildConfig.VERSION_NAME} · ${Build.MANUFACTURER} ${Build.MODEL} · android ${Build.VERSION.RELEASE} (sdk ${Build.VERSION.SDK_INT})\n" +
-                "shizuku: ${ShizukuManager.status.value} · capture pre-approved: ${ShizukuManager.projectionPreApproved(this)}\n\n"
+                "${SystemMode.describe(this)} · shizuku: ${ShizukuManager.status.value} · capture pre-approved: ${ShizukuManager.projectionPreApproved(this)}\n\n"
             val text = header + LogServer.snapshot().joinToString("\n")
             startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
@@ -149,6 +140,27 @@ class SettingsActivity : AppCompatActivity() {
         }
         action("add speaker manually", { "for receivers that don't show up automatically (ip:port)" }) { addManualDevice() }
         action("version", { "centuryplay ${BuildConfig.VERSION_NAME} · airplay 1 + 2 · alac" }) {}
+    }
+
+    /** Shizuku and the adb pre-approval: only relevant when not running as a system app. */
+    private fun shizukuSettings() {
+        action("shizuku", { shizukuSummary() }) { onShizukuClicked() }
+        action("skip the capture prompt without shizuku", {
+            if (ShizukuManager.projectionPreApproved(this)) "done — android won't ask again"
+            else "one adb command from a computer, once"
+        }) {
+            val cmd = "adb shell appops set $packageName PROJECT_MEDIA allow"
+            MaterialAlertDialogBuilder(this)
+                .setTitle("skip the capture prompt")
+                .setMessage("connect the phone to a computer with usb debugging on and run:\n\n$cmd\n\nandroid will then allow audio capture without asking (it survives reboots, not reinstalls).")
+                .setPositiveButton("copy") { _, _ ->
+                    val cm = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("adb", cmd))
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+        }
+        switch("capture through shizuku", "no screen-capture permission, and the phone speaker is fully bypassed (android 13+).", prefs.useShizukuCapture) { prefs.useShizukuCapture = it }
     }
 
     // ------------------------------------------------------------------ actions
