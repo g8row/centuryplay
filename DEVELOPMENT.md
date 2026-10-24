@@ -258,3 +258,59 @@ http.request.uri contains "pair"
 
 ## protocol documentation
 see [docs/airplay_protocol.md](docs/AIRPLAY_PROTOCOL.md) for detailed protocol documentation.
+
+
+---
+
+## Windows Release APK (no GitHub Actions required)
+
+The project currently uses **Gradle 8.9** (use **JDK 17 or 21**, not JDK 25), `compileSdk 35`,
+Android Build Tools `35.0.0`, NDK `27.2.12479018` and CMake `3.22.1`.
+Install them from Android Studio → Settings → Languages & Frameworks → Android SDK
+(SDK Platforms and SDK Tools; enable *Show Package Details* for exact versions).
+
+From a PowerShell terminal in the repository root:
+
+```powershell
+$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
+# Set JAVA_HOME to the actual JDK 17/21 installed on your PC.
+$env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-21"
+$env:Path = "$env:JAVA_HOME\bin;$env:Path"
+.\gradlew.bat --version
+.\gradlew.bat testDebugUnitTest assembleRelease --no-daemon
+```
+
+By default, `assembleRelease` produces **unsigned**
+`app\build\outputs\apk\release\app-release-unsigned.apk`.
+To install or distribute it, align and sign it with a persistent private key.
+**Create the keystore only once** and back it up securely; keep using the same key
+for later APK updates.
+
+```powershell
+$sdk = $env:ANDROID_HOME
+$keystore = "$HOME\.android\centuryplay-release.jks"
+if (!(Test-Path $keystore)) {
+  & "$env:JAVA_HOME\bin\keytool.exe" -genkeypair -v `
+    -keystore $keystore -alias centuryplay -keyalg RSA -keysize 3072 -validity 10000
+}
+$unsigned = ".\app\build\outputs\apk\release\app-release-unsigned.apk"
+$aligned = ".\app\build\outputs\apk\release\centuryplay-aligned.apk"
+$signed = ".\app\build\outputs\apk\release\centuryplay-2.1.0-release.apk"
+& "$sdk\build-tools\35.0.0\zipalign.exe" -f -p 4 $unsigned $aligned
+& "$sdk\build-tools\35.0.0\apksigner.bat" sign --ks $keystore `
+  --ks-key-alias centuryplay --out $signed $aligned
+& "$sdk\build-tools\35.0.0\apksigner.bat" verify --verbose $signed
+```
+
+Signed APK: `app\build\outputs\apk\release\centuryplay-2.1.0-release.apk`.
+A locally signed APK can update an existing install **only when it uses the same
+signing key**; otherwise Android will reject the update. If the existing APK has
+another signature, uninstalling it also deletes its stored app data.
+
+### Hardware verification after the merge
+
+On an Android 11 TV and HomePod mini: test AirPlay 2 SETUP, start capture and
+switch to a different video app, check sound and remote volume-up/down, then
+select 150–500 ms latency and verify lip-sync. Low latency is sensitive to Wi-Fi
+jitter; if audio drops out, increase it in 50 ms increments. Test repeat casting
+from YouTube Music, and permissions on Android 13+ and 17+ where available.

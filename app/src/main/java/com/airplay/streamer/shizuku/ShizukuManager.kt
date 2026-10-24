@@ -4,6 +4,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.IBinder
 import com.airplay.streamer.BuildConfig
 import com.airplay.streamer.service.NotificationListener
@@ -131,16 +132,18 @@ object ShizukuManager {
         val svc = awaitPrivileged() ?: return@withContext "Shizuku isn't ready"
         val pkg = appContext.packageName
         val listener = ComponentName(appContext, NotificationListener::class.java).flattenToString()
-        val commands = listOf(
-            "Skip screen-capture consent" to "appops set $pkg PROJECT_MEDIA allow",
-            "Microphone/capture" to "pm grant $pkg android.permission.RECORD_AUDIO",
-            "Notifications" to "pm grant $pkg android.permission.POST_NOTIFICATIONS",
-            "Nearby devices" to "pm grant $pkg android.permission.NEARBY_WIFI_DEVICES",
-            "Local network" to "pm grant $pkg android.permission.ACCESS_LOCAL_NETWORK",
-            "Track info access" to "cmd notification allow_listener $listener",
-            "Battery optimisation exemption" to "cmd deviceidle whitelist +$pkg",
-            "Background running" to "appops set $pkg RUN_ANY_IN_BACKGROUND allow",
-        )
+        val commands = buildList {
+            add("Skip screen-capture consent" to "appops set $pkg PROJECT_MEDIA allow")
+            add("Microphone/capture" to "pm grant $pkg android.permission.RECORD_AUDIO")
+            if (Build.VERSION.SDK_INT >= 33) {
+                add("Notifications" to "pm grant $pkg android.permission.POST_NOTIFICATIONS")
+                add("Nearby devices" to "pm grant $pkg android.permission.NEARBY_WIFI_DEVICES")
+            }
+            if (Build.VERSION.SDK_INT >= 37) add("Local network" to "pm grant $pkg android.permission.ACCESS_LOCAL_NETWORK")
+            add("Track info access" to "cmd notification allow_listener $listener")
+            add("Battery optimisation exemption" to "cmd deviceidle whitelist +$pkg")
+            add("Background running" to "appops set $pkg RUN_ANY_IN_BACKGROUND allow")
+        }
         commands.joinToString("\n") { (label, cmd) ->
             val result = runCatching { svc.exec(cmd) }.getOrElse { "-1\n${it.message}" }
             val ok = result.substringBefore('\n').trim() == "0"
