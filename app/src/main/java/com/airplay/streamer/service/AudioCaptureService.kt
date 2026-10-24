@@ -1,5 +1,6 @@
 package com.airplay.streamer.service
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
@@ -10,6 +11,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.media.AudioAttributes
@@ -30,6 +32,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.os.PowerManager
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import com.airplay.streamer.MainActivity
 import com.airplay.streamer.R
@@ -298,7 +301,7 @@ class AudioCaptureService : Service() {
             return null
         }
         val settings = SessionSettings(
-            latencyMs = prefs.latencyMs.coerceIn(500, 4000),
+            latencyMs = prefs.latencyMs.coerceIn(150, 4000),
             preferPcm = prefs.preferPcm,
             preferAirPlay2 = prefs.preferAirPlay2,
             senderName = prefs.senderName,
@@ -629,7 +632,7 @@ class AudioCaptureService : Service() {
             // Persist so a crash/kill mid-stream can't leave the phone silenced.
             prefs.raw.edit().putInt(KEY_RESTORE_VOLUME, savedMusicVolume).apply()
         }
-        runCatching { am.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0) }
+        runCatching { am.setStreamVolume(AudioManager.STREAM_MUSIC, VolumeKeyPolicy.parkedIndex(am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)), 0) }
     }
 
     private fun restorePhoneVolume() {
@@ -652,9 +655,8 @@ class AudioCaptureService : Service() {
     /**
      * Fallback for volume keys that reach the phone's music stream instead of our remote
      * session (e.g. while an app forces the music stream): each step is applied to the
-     * speakers and the phone index is put back to its baseline — 0 when the phone is
-     * silenced, mid-scale when audio is rerouted (so both directions register). The
-     * original phone volume is restored when the session ends.
+     * speakers and the phone index is returned to a near-silent baseline (index 1
+     * for 50+ step TVs, 0 otherwise). The original phone volume is restored afterward.
      */
     private fun registerVolumeReceiver(s: StreamSession) {
         if (!prefs.volumeKeysControlSpeakers) return
@@ -663,14 +665,21 @@ class AudioCaptureService : Service() {
         // Only needed when the phone is silenced by volume (projection capture); when audio
         // is rerouted the keys reach our remote session and the phone index is left alone.
         if (reroutedCapture || savedMusicVolume < 0) return
-        val baseline = 0
+        val baseline = VolumeKeyPolicy.parkedIndex(max)
+        var lastDirection = 0
+        var lastAt = 0L
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 if (intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_TYPE", -1) != AudioManager.STREAM_MUSIC) return
                 val value = intent.getIntExtra("android.media.EXTRA_VOLUME_STREAM_VALUE", -1)
                 if (value < 0 || value == baseline) return
-                adjustGroupVolume((value - baseline) / max.toFloat())
                 runCatching { am.setStreamVolume(AudioManager.STREAM_MUSIC, baseline, 0) }
+                val direction = if (value > baseline) 1 else -1
+                val now = SystemClock.uptimeMillis()
+                if (VolumeKeyPolicy.isDuplicate(direction, lastDirection, now, lastAt)) return
+                lastDirection = direction
+                lastAt = now
+                adjustGroupVolume(direction * VolumeKeyPolicy.stepFraction(max))
             }
         }
         volumeReceiver = receiver
@@ -769,11 +778,21 @@ class AudioCaptureService : Service() {
             else -> ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
         }
         val notification = buildNotification(_state.value)
-        try {
-            if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, notification, type) else startForeground(NOTIFICATION_ID, notification)
-            foregroundType = type
-        } catch (e: Exception) {
-            LogServer.log("startForeground failed: ${e.message}")
+        // Android 11+ needs microphone FGS for background playback capture.
+        // Android 14+ can refuse microphone FGS started from the background: fall back.
+        val withMic = if (
+            Build.VERSION.SDK_INT >= 30 &&
+            type == ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION &&
+            checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        ) type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else type
+        for (candidate in listOf(withMic, type).distinct()) {
+            try {
+                if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, notification, candidate) else startForeground(NOTIFICATION_ID, notification)
+                foregroundType = candidate
+                return
+            } catch (e: Exception) {
+                LogServer.log("startForeground(type=$candidate) failed: ${e.message}")
+            }
         }
     }
 

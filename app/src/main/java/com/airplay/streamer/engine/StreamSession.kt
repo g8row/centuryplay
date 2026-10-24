@@ -183,13 +183,14 @@ class StreamSession(
                 return
             }
             try {
+                // The first AirPlay 2 sync packet can be sent from connect().
+                sink.offsetMs = offsetFor(device.identity)
                 sink.connect(engine.context)
                 if (entry.removed) {
                     runCatching { sink.disconnect() }
                     return
                 }
                 sink.listener = this
-                sink.offsetMs = offsetFor(device.identity)
                 sink.setVolume(entry.volume)
                 lastMetadata?.let { sink.setMetadata(it) }
                 entry.sink = sink
