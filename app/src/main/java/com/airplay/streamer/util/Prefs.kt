@@ -165,5 +165,15 @@ class Prefs(context: Context) {
 
     companion object {
         const val NAME = "airplay_prefs"
+        const val LOCAL_NETWORK = "android.permission.ACCESS_LOCAL_NETWORK"
+
+        /**
+         * Android 17+ blocks mDNS/LAN access without ACCESS_LOCAL_NETWORK (enforced even for
+         * older target SDKs). True if this OS has the permission and it isn't granted yet.
+         */
+        fun needsLocalNetworkPermission(context: Context): Boolean {
+            val exists = runCatching { context.packageManager.getPermissionInfo(LOCAL_NETWORK, 0) }.isSuccess
+            return exists && context.checkSelfPermission(LOCAL_NETWORK) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
     }
 }

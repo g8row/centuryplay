@@ -79,6 +79,9 @@
     <string name="forget_password">forget password</string>
 
     <!-- setup card -->
+    <string name="setup_network_title">allow finding speakers</string>
+    <string name="setup_network_text">android needs your ok before apps can look for devices on your wi-fi. without it no speakers show up.</string>
+    <string name="setup_network_button">allow</string>
     <string name="setup_permissions_title">allow audio capture</string>
     <string name="setup_permissions_text">centuryplay streams whatever your phone is playing. android needs your ok first.</string>
     <string name="setup_permissions_button">allow</string>

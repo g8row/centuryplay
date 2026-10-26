@@ -12,8 +12,8 @@ android {
         applicationId = "com.airplay.streamer"
         minSdk = 30  // Android 11+ required for MediaRouter2 (AudioPlaybackCapture needs 10+)
         targetSdk = 35
-        versionCode = 4
-        versionName = "2.0"
+        versionCode = 5
+        versionName = "2.0.1"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
@@ -55,6 +55,14 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+    }
+
+    packaging {
+        // Store native libs compressed (extracted at install), so APK zip alignment can't
+        // break 16 KB page-size devices with this AGP version.
+        jniLibs {
+            useLegacyPackaging = true
+        }
     }
 
     buildFeatures {

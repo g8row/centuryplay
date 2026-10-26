@@ -11,3 +11,5 @@ target_compile_options(alac_codec PRIVATE -O3 -w)
 add_library(centuryplay_native SHARED alac_jni.cpp)
 target_compile_options(centuryplay_native PRIVATE -O3 -Wall)
 target_link_libraries(centuryplay_native alac_codec log)
+# 16 KB page-size devices (Android 15+) can only load libraries with 16 KB-aligned segments.
+target_link_options(centuryplay_native PRIVATE "-Wl,-z,max-page-size=16384")

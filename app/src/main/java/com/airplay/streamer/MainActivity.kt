@@ -58,7 +58,8 @@ class MainActivity : AppCompatActivity() {
     private var lastMedia = MediaInfoTracker.MediaInfo()
     private val endDrag = Runnable { groupDragging = false }
 
-    private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+    private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
+        if (results[Prefs.LOCAL_NETWORK] == true) viewModel.refreshDiscovery()
         updateSetupCard()
     }
 
@@ -76,6 +77,10 @@ class MainActivity : AppCompatActivity() {
         setupList()
         setupControls()
         observe()
+        // Without this Android 17+ hides every speaker: ask right away.
+        if (savedInstanceState == null && Prefs.needsLocalNetworkPermission(this)) {
+            permissionLauncher.launch(arrayOf(Prefs.LOCAL_NETWORK))
+        }
     }
 
     override fun onResume() {
@@ -397,13 +402,14 @@ class MainActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------------ setup card
 
-    private enum class Setup { PERMISSIONS, SHIZUKU_PERMISSION, SHIZUKU_SETUP, NOTIFICATION_ACCESS, SHIZUKU_TIP }
+    private enum class Setup { LOCAL_NETWORK, PERMISSIONS, SHIZUKU_PERMISSION, SHIZUKU_SETUP, NOTIFICATION_ACCESS, SHIZUKU_TIP }
 
     private fun pendingSetup(): Setup? {
         val shizuku = ShizukuManager.status.value
         val needsProjectionApproval = !ShizukuManager.projectionPreApproved(this)
         val hasListener = MediaInfoTracker.hasNotificationAccess(this)
         return when {
+            Prefs.needsLocalNetworkPermission(this) -> Setup.LOCAL_NETWORK
             shizuku == ShizukuManager.Status.NO_PERMISSION -> Setup.SHIZUKU_PERMISSION
             shizuku == ShizukuManager.Status.READY && (needsProjectionApproval || !hasListener || !StreamController.hasRuntimePermissions(this)) -> Setup.SHIZUKU_SETUP
             !StreamController.hasRuntimePermissions(this) -> Setup.PERMISSIONS
@@ -417,6 +423,7 @@ class MainActivity : AppCompatActivity() {
     private fun updateSetupCard() {
         val setup = pendingSetup()
         val (title, text, button) = when (setup) {
+            Setup.LOCAL_NETWORK -> Triple(R.string.setup_network_title, R.string.setup_network_text, R.string.setup_network_button)
             Setup.PERMISSIONS -> Triple(R.string.setup_permissions_title, R.string.setup_permissions_text, R.string.setup_permissions_button)
             Setup.SHIZUKU_PERMISSION -> Triple(R.string.setup_shizuku_perm_title, R.string.setup_shizuku_perm_text, R.string.setup_shizuku_perm_button)
             Setup.SHIZUKU_SETUP -> Triple(R.string.setup_shizuku_title, R.string.setup_shizuku_text, R.string.setup_shizuku_button)
@@ -435,6 +442,15 @@ class MainActivity : AppCompatActivity() {
         binding.setupCard.visibility = View.VISIBLE
         binding.setupButton.setOnClickListener {
             when (setup) {
+                Setup.LOCAL_NETWORK -> {
+                    if (shouldShowRequestPermissionRationale(Prefs.LOCAL_NETWORK) || !prefs.raw.getBoolean("asked_local_network", false)) {
+                        prefs.raw.edit().putBoolean("asked_local_network", true).apply()
+                        permissionLauncher.launch(arrayOf(Prefs.LOCAL_NETWORK))
+                    } else {
+                        // Denied permanently: the app's settings page is the only way back.
+                        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:$packageName")))
+                    }
+                }
                 Setup.PERMISSIONS -> permissionLauncher.launch(
                     buildList {
                         add(Manifest.permission.RECORD_AUDIO)
