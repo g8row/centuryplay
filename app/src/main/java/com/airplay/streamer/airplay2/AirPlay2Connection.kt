@@ -86,7 +86,7 @@ class AirPlay2Connection(
         return send("POST", uri, "HTTP/1.1", hdrs, body ?: ByteArray(0))
     }
 
-    /** RTSP exchange (adds CSeq, DACP-ID, Active-Remote, Client-Instance). */
+    /** RTSP exchange (adds CSeq, DACP-ID, Active-Remote, Client-Instance, User-Agent). */
     fun exchange(
         method: String,
         uri: String,
@@ -99,6 +99,8 @@ class AirPlay2Connection(
         hdrs["DACP-ID"] = dacpId
         hdrs["Active-Remote"] = activeRemote
         hdrs["Client-Instance"] = dacpId
+        // HomePods may reject RTSP SETUP with 403 when User-Agent is absent.
+        hdrs["User-Agent"] = USER_AGENT
         if (contentType != null) hdrs["Content-Type"] = contentType
         hdrs.putAll(headers)
         return send(method, uri, "RTSP/1.0", hdrs, body)

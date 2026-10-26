@@ -244,7 +244,7 @@ class AirPlay2Sink(
                         "isMedia" to true,
                         // Must cover our configured latency (settings allow up to 4 s).
                         "latencyMax" to maxOf(88200L, context.latencyFrames + 11025L).toInt(),
-                        "latencyMin" to 11025,
+                        "latencyMin" to minOf(11025L, context.latencyFrames).toInt(),
                         "shk" to shk,
                         "spf" to AudioPacket.FRAMES,
                         "sr" to 44100,
@@ -354,9 +354,11 @@ class AirPlay2Sink(
         p[0] = if (first) 0x90.toByte() else 0x80.toByte()
         p[1] = 0xD4.toByte()
         p[2] = 0x00; p[3] = 0x07
-        RaopSink.putInt(p, 4, rtp(current - (context.latencyFrames - 11025)))
+        // Use a constant RTP gap: at exactly 250 ms the old fields were equal.
+        val (reference, future) = AirPlay2SyncTiming.referenceFrames(current, context.latencyFrames)
+        RaopSink.putInt(p, 4, rtp(reference))
         NtpClock.writeNtpNanos(p, 8, now)
-        RaopSink.putInt(p, 16, rtp(current))
+        RaopSink.putInt(p, 16, rtp(future))
         return p
     }
 

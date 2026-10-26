@@ -69,7 +69,7 @@ class SettingsActivity : AppCompatActivity() {
         section("streaming")
         slider(
             "latency", "how far behind the phone the speakers play. lower = snappier, higher = fewer dropouts on busy wi-fi. applies to the next stream.",
-            0.5f, 4f, 0.25f, prefs.latencyMs / 1000f, { "%.2f s".format(it) }
+            0.15f, 4f, 0.05f, prefs.latencyMs / 1000f, { "%.2f s".format(it) }
         ) { prefs.latencyMs = (it * 1000).toInt() }
         switch("lossless compression (alac)", "halves wi-fi usage with no quality loss. turn off only for receivers that misbehave.", !prefs.preferPcm) { prefs.preferPcm = !it }
         switch("prefer airplay 2", "use airplay 2 for speakers that support both. airplay 1 is simpler and works with more receivers.", prefs.preferAirPlay2) { prefs.preferAirPlay2 = it }

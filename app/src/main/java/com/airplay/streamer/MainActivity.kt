@@ -1,9 +1,7 @@
 package com.airplay.streamer
 
-import android.Manifest
 import android.content.Intent
 import android.content.res.ColorStateList
-import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.text.InputType
@@ -451,12 +449,7 @@ class MainActivity : AppCompatActivity() {
                         startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:$packageName")))
                     }
                 }
-                Setup.PERMISSIONS -> permissionLauncher.launch(
-                    buildList {
-                        add(Manifest.permission.RECORD_AUDIO)
-                        if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
-                    }.toTypedArray()
-                )
+                Setup.PERMISSIONS -> permissionLauncher.launch(StreamController.runtimePermissions())
                 Setup.SHIZUKU_PERMISSION -> ShizukuManager.requestPermission()
                 Setup.SHIZUKU_SETUP -> {
                     binding.setupButton.isEnabled = false

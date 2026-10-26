@@ -31,13 +31,18 @@ object StreamController {
         return ShizukuManager.status.value == ShizukuManager.Status.READY
     }
 
-    fun hasRuntimePermissions(context: Context): Boolean {
-        val needed = buildList {
-            add(Manifest.permission.RECORD_AUDIO)
-            if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+    fun runtimePermissions(): Array<String> = buildList {
+        add(Manifest.permission.RECORD_AUDIO)
+        if (Build.VERSION.SDK_INT >= 33) {
+            add(Manifest.permission.POST_NOTIFICATIONS)
+            add(Manifest.permission.NEARBY_WIFI_DEVICES)
         }
-        return needed.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
-    }
+        // Same "Nearby devices" group on Android 17; without it mDNS discovery fails. Literal: compileSdk predates the constant.
+        if (Build.VERSION.SDK_INT >= 37) add("android.permission.ACCESS_LOCAL_NETWORK")
+    }.toTypedArray()
+
+    fun hasRuntimePermissions(context: Context): Boolean =
+        runtimePermissions().all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
 
     /** Connects [device], adding it to the current session (multi-room) if one is running. */
     fun connect(context: Context, device: AirPlayDevice) {

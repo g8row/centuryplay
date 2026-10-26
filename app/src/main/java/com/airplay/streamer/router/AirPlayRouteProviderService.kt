@@ -62,6 +62,7 @@ class AirPlayRouteProviderService : MediaRoute2ProviderService() {
     private var lastState = SessionState()
     private var playingPackage: String? = null
 
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     private val audioManager by lazy { getSystemService(AUDIO_SERVICE) as android.media.AudioManager }
     private val deviceCallback = object : android.media.AudioDeviceCallback() {
         override fun onAudioDevicesAdded(added: Array<out android.media.AudioDeviceInfo>?) = publish()
@@ -131,10 +132,8 @@ class AirPlayRouteProviderService : MediaRoute2ProviderService() {
             if (state.isStreaming) {
                 val id = pendingSessionId ?: return@let
                 notifySessionCreated(req, sessionInfo(id, sessions[id] ?: packageName, selected, airplayIds, streaming))
-                pendingRequest = -1L
-                pendingSessionId = null
+                clearPending()
             }
-            return
         }
 
         val wanted = LinkedHashMap<String, String>()
@@ -151,12 +150,30 @@ class AirPlayRouteProviderService : MediaRoute2ProviderService() {
             notifySessionReleased(id)
         }
         for ((id, client) in wanted) {
+            if (id == pendingSessionId) continue // not created yet: the pending request answers it
             val info = sessionInfo(id, client, selected, airplayIds, streaming)
             if (sessions.put(id, client) == null) notifySessionCreated(REQUEST_ID_NONE, info) else notifySessionUpdated(info)
         }
     }
 
-    private fun clientSessionId(pkg: String) = "centuryplay_for_$pkg"
+    private fun clearPending() {
+        pendingRequest = -1L
+        pendingSessionId = null
+    }
+
+    /** Never leave the app's request hanging: it would ignore every later tap on that route. */
+    private fun failPending() {
+        val req = pendingRequest.takeIf { it != -1L } ?: return
+        pendingSessionId?.let { sessions.remove(it) }
+        clearPending()
+        notifyRequestFailed(req, REASON_UNKNOWN_ERROR)
+        publish()
+    }
+
+    /** Bumped per request: the system drops a create-result whose session id already exists. */
+    private var generation = 0
+
+    private fun clientSessionId(pkg: String) = "centuryplay_for_${pkg}_$generation"
 
     private fun sessionInfo(id: String, client: String, selected: List<String>, all: List<String>, streaming: Boolean): RoutingSessionInfo {
         val b = RoutingSessionInfo.Builder(id, client)
@@ -222,16 +239,15 @@ class AirPlayRouteProviderService : MediaRoute2ProviderService() {
         }
         val device = deviceFor(routeId) ?: return notifyRequestFailed(requestId, REASON_ROUTE_NOT_AVAILABLE)
         LogServer.log("Media router: $packageName selected ${device.displayName}")
+        generation++
         val id = clientSessionId(packageName)
         sessions[id] = packageName
-        if (StreamController.canConnectSilently(this)) {
-            StreamController.connect(this, device)
-            notifySessionCreated(requestId, sessionInfo(id, packageName, listOf(routeId), lastDevices.map { routeId(it) }, true))
-        } else {
-            pendingRequest = requestId
-            pendingSessionId = id
-            askForConsent(device)
-        }
+        // Answered by publish() once the speaker plays; an earlier reply followed by an "idle"
+        // update crashes the app's MediaRouter.
+        pendingRequest = requestId
+        pendingSessionId = id
+        if (StreamController.canConnectSilently(this)) StreamController.connect(this, device) else askForConsent(device)
+        handler.postDelayed({ if (pendingRequest == requestId) failPending() }, CONSENT_TIMEOUT_MS)
     }
 
     override fun onReleaseSession(requestId: Long, sessionId: String) {
@@ -291,6 +307,8 @@ class AirPlayRouteProviderService : MediaRoute2ProviderService() {
     }
 
     companion object {
+        private const val CONSENT_TIMEOUT_MS = 20_000L
+
         private const val OWN_SESSION = "centuryplay_session"
         private const val PHONE_ROUTE = "centuryplay_phone"
         private val EXTERNAL_OUTPUT_TYPES = setOf(

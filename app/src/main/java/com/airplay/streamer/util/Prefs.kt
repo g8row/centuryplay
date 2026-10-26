@@ -12,7 +12,7 @@ class Prefs(context: Context) {
     private val secrets: SharedPreferences = app.getSharedPreferences("airplay_secrets", Context.MODE_PRIVATE)
 
     var latencyMs: Int
-        get() = raw.getInt("latency_ms", 2000)
+        get() = raw.getInt("latency_ms", 200)
         set(v) = raw.edit().putInt("latency_ms", v).apply()
 
     /** Send uncompressed PCM instead of ALAC (more bandwidth, zero encode cost). */
