@@ -848,13 +848,8 @@ class AudioCaptureService : Service() {
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                     )
                 )
-            mediaSession?.let {
-                builder.setStyle(
-                    androidx.media.app.NotificationCompat.MediaStyle()
-                        .setMediaSession(android.support.v4.media.session.MediaSessionCompat.Token.fromToken(it.session.sessionToken))
-                        .setShowActionsInCompactView(0, 1, 2)
-                )
-            }
+            // No MediaStyle: it would put a centuryplay player in the QS media carousel next to
+            // the app actually playing. The remote-volume session works without it.
         } else {
             builder.setContentTitle(getString(R.string.standby_title))
                 .setContentText(getString(R.string.standby_text))
