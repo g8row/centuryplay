@@ -278,7 +278,7 @@ class MainActivity : AppCompatActivity() {
         }
         binding.setupDismiss.setOnClickListener {
             dismissedSetup = binding.setupTitle.text.toString()
-            if (dismissedSetup == getString(R.string.setup_tip_title)) {
+            if (dismissedSetup == getString(R.string.setup_tip_title) || dismissedSetup == getString(R.string.setup_start_title)) {
                 prefs.raw.edit().putBoolean("shizuku_tip_dismissed", true).apply()
             }
             binding.setupCard.visibility = View.GONE
@@ -409,7 +409,7 @@ class MainActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------------ setup card
 
-    private enum class Setup { LOCAL_NETWORK, PERMISSIONS, SHIZUKU_PERMISSION, SHIZUKU_SETUP, NOTIFICATION_ACCESS, SHIZUKU_TIP }
+    private enum class Setup { LOCAL_NETWORK, PERMISSIONS, SHIZUKU_PERMISSION, SHIZUKU_SETUP, NOTIFICATION_ACCESS, SHIZUKU_TIP, SHIZUKU_START }
 
     private fun pendingSetup(): Setup? {
         val shizuku = ShizukuManager.status.value
@@ -422,8 +422,10 @@ class MainActivity : AppCompatActivity() {
             Prefs.needsLocalNetworkPermission(this) -> Setup.LOCAL_NETWORK
             !StreamController.hasRuntimePermissions(this) -> Setup.PERMISSIONS
             !hasListener && prefs.showNowPlaying -> Setup.NOTIFICATION_ACCESS
-            shizuku == ShizukuManager.Status.NOT_INSTALLED && needsProjectionApproval &&
-                !prefs.raw.getBoolean("shizuku_tip_dismissed", false) -> Setup.SHIZUKU_TIP
+            // Dismissing either Shizuku tip hides it for good.
+            prefs.raw.getBoolean("shizuku_tip_dismissed", false) -> null
+            shizuku == ShizukuManager.Status.NOT_INSTALLED -> Setup.SHIZUKU_TIP
+            shizuku == ShizukuManager.Status.NOT_RUNNING -> Setup.SHIZUKU_START
             else -> null
         }
     }
@@ -437,6 +439,7 @@ class MainActivity : AppCompatActivity() {
             Setup.SHIZUKU_SETUP -> Triple(R.string.setup_shizuku_title, R.string.setup_shizuku_text, R.string.setup_shizuku_button)
             Setup.NOTIFICATION_ACCESS -> Triple(R.string.setup_listener_title, R.string.setup_listener_text, R.string.setup_listener_button)
             Setup.SHIZUKU_TIP -> Triple(R.string.setup_tip_title, R.string.setup_tip_text, R.string.setup_tip_button)
+            Setup.SHIZUKU_START -> Triple(R.string.setup_start_title, R.string.setup_start_text, R.string.setup_start_button)
             null -> {
                 binding.setupCard.visibility = View.GONE
                 return
@@ -444,7 +447,9 @@ class MainActivity : AppCompatActivity() {
         }
         if (dismissedSetup == getString(title)) return
         binding.setupTitle.setText(title)
-        binding.setupText.setText(text)
+        binding.setupText.text = if (setup == Setup.SHIZUKU_TIP || setup == Setup.SHIZUKU_START) {
+            getString(text) + "\n" + getString(R.string.shizuku_pluses)
+        } else getString(text)
         binding.setupButton.setText(button)
         binding.setupButton.isEnabled = true
         binding.setupCard.visibility = View.VISIBLE
@@ -480,6 +485,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 Setup.NOTIFICATION_ACCESS -> startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                 Setup.SHIZUKU_TIP -> startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://shizuku.rikka.app/")))
+                Setup.SHIZUKU_START -> packageManager.getLaunchIntentForPackage(ShizukuManager.PACKAGE)?.let { startActivity(it) }
             }
         }
     }

@@ -94,9 +94,13 @@
     <string name="setup_listener_title">show what\'s playing</string>
     <string name="setup_listener_text">allow notification access so speakers can show the song, artist and artwork.</string>
     <string name="setup_listener_button">allow</string>
-    <string name="setup_tip_title">tired of the capture prompt?</string>
-    <string name="setup_tip_text">with the free shizuku app, centuryplay never asks again, keeps the phone speaker silent and can start streaming by itself when music plays. (settings has a one-line adb alternative.)</string>
+    <string name="setup_tip_title">get more with shizuku</string>
+    <string name="setup_tip_text">the free shizuku app unlocks:</string>
     <string name="setup_tip_button">get shizuku</string>
+    <string name="setup_start_title">start shizuku</string>
+    <string name="setup_start_text">shizuku is installed but not running. start it to unlock:</string>
+    <string name="setup_start_button">open shizuku</string>
+    <string name="shizuku_pluses">+ apple music and other apps that block capture\n+ no capture prompt, ever\n+ phone speaker fully silent while streaming\n+ auto-play when music starts\n+ one tap grants every permission</string>
     <string name="setup_done">setup complete</string>
     <string name="dismiss">dismiss</string>
 

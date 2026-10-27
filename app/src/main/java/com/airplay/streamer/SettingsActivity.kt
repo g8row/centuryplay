@@ -18,6 +18,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.airplay.streamer.service.MediaInfoTracker
 import com.airplay.streamer.shizuku.ShizukuManager
 import com.airplay.streamer.util.LogServer
@@ -57,6 +58,12 @@ class SettingsActivity : AppCompatActivity() {
             v.updatePadding(bottom = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom + dp(32)); insets
         }
         build()
+        // Shizuku's binder arrives asynchronously (after onResume's refresh): follow its status.
+        lifecycleScope.launch {
+            repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                ShizukuManager.status.collect { refreshers.forEach { it() } }
+            }
+        }
     }
 
     override fun onResume() {
@@ -66,6 +73,7 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun build() {
+        shizukuCard()
         section("streaming")
         slider(
             "latency", "how far behind the phone the speakers play. lower = snappier, higher = fewer dropouts on busy wi-fi. applies to the next stream.",
@@ -88,7 +96,6 @@ class SettingsActivity : AppCompatActivity() {
 
         section("system integration")
         switch("speakers in the system output switcher", "your airplay speakers appear in the media controls' output picker of any app, like bluetooth devices. hidden while headphones are connected.", prefs.systemSwitcher) { prefs.systemSwitcher = it }
-        action("shizuku", { shizukuSummary() }) { onShizukuClicked() }
         action("skip the capture prompt without shizuku", {
             if (ShizukuManager.projectionPreApproved(this)) "done — android won't ask again"
             else "one adb command from a computer, once"
@@ -154,10 +161,72 @@ class SettingsActivity : AppCompatActivity() {
     // ------------------------------------------------------------------ actions
 
     private fun shizukuSummary(): String = when (ShizukuManager.status.value) {
-        ShizukuManager.Status.NOT_INSTALLED -> "not installed — tap to learn how shizuku removes every permission prompt"
+        ShizukuManager.Status.NOT_INSTALLED -> "not installed"
         ShizukuManager.Status.NOT_RUNNING -> "installed but not running — open shizuku and start it"
-        ShizukuManager.Status.NO_PERMISSION -> "running — tap to connect centuryplay"
-        ShizukuManager.Status.READY -> "connected — tap to re-run one-tap setup"
+        ShizukuManager.Status.NO_PERMISSION -> "running — connect centuryplay to it"
+        ShizukuManager.Status.READY -> "connected and active"
+    }
+
+    private fun shizukuButton(): String = when (ShizukuManager.status.value) {
+        ShizukuManager.Status.NOT_INSTALLED -> "get shizuku"
+        ShizukuManager.Status.NOT_RUNNING -> "open shizuku"
+        ShizukuManager.Status.NO_PERMISSION -> "connect"
+        ShizukuManager.Status.READY -> "re-run setup"
+    }
+
+    /** The highlighted card at the top: what Shizuku unlocks, its state and the next step. */
+    private fun shizukuCard() {
+        val card = com.google.android.material.card.MaterialCardView(this).apply {
+            radius = dp(24).toFloat()
+            cardElevation = 0f
+            strokeWidth = 0
+            setCardBackgroundColor(MaterialColors.getColor(this, com.google.android.material.R.attr.colorPrimaryContainer))
+        }
+        val onCard = MaterialColors.getColor(card, com.google.android.material.R.attr.colorOnPrimaryContainer)
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(20), dp(20), dp(16)) }
+        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val icon = android.widget.ImageView(this)
+        head.addView(icon, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(16) })
+        val titles = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        titles.addView(TextView(this).apply {
+            text = "shizuku"
+            setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_TitleLarge)
+            setTextColor(onCard)
+        })
+        val status = TextView(this).apply {
+            setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodyMedium)
+            setTextColor(onCard)
+        }
+        titles.addView(status)
+        head.addView(titles, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        col.addView(head)
+        col.addView(TextView(this).apply {
+            text = getString(R.string.shizuku_pluses)
+            setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodyMedium)
+            setTextColor(onCard)
+            setLineSpacing(dp(2).toFloat(), 1f)
+            setPadding(0, dp(14), 0, 0)
+        })
+        val button = com.google.android.material.button.MaterialButton(this).apply { setOnClickListener { onShizukuClicked() } }
+        col.addView(button, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            gravity = Gravity.END; topMargin = dp(8)
+        })
+        card.addView(col)
+        container.addView(card, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            setMargins(dp(16), dp(8), dp(16), dp(8))
+        })
+        refreshers += {
+            // The real Shizuku icon once it's installed; a plain key until then.
+            val appIcon = runCatching { packageManager.getApplicationIcon(ShizukuManager.PACKAGE) }.getOrNull()
+            if (appIcon != null) {
+                icon.setImageDrawable(appIcon); icon.imageTintList = null
+            } else {
+                icon.setImageResource(R.drawable.ic_shizuku); icon.imageTintList = android.content.res.ColorStateList.valueOf(onCard)
+            }
+            status.text = shizukuSummary()
+            button.text = shizukuButton()
+        }
+        refreshers.last()()
     }
 
     private fun onShizukuClicked() {

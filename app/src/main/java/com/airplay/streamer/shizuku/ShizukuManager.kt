@@ -30,6 +30,9 @@ object ShizukuManager {
 
     enum class Status { NOT_INSTALLED, NOT_RUNNING, NO_PERMISSION, READY }
 
+    /** The Shizuku manager app. */
+    const val PACKAGE = "moe.shizuku.privileged.api"
+
     private val _status = MutableStateFlow(Status.NOT_RUNNING)
     val status: StateFlow<Status> = _status.asStateFlow()
 
@@ -98,7 +101,7 @@ object ShizukuManager {
     }
 
     private fun isInstalled(): Boolean = try {
-        appContext.packageManager.getPackageInfo("moe.shizuku.privileged.api", 0)
+        appContext.packageManager.getPackageInfo(PACKAGE, 0)
         true
     } catch (_: PackageManager.NameNotFoundException) {
         Shizuku.pingBinder() // Sui / other managers
