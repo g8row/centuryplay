@@ -54,11 +54,18 @@ class HapPairing(private val connection: AirPlay2Connection) {
     private var salt: ByteArray? = null
     private var serverSrpPublic: ByteArray? = null
 
-    /** Step 1: shows the PIN on screen (Apple TV) and runs M1/M2. */
-    fun startSetup() {
-        // Macs/Apple TVs hold this request while their prompt is on screen.
-        connection.setReadTimeout(60_000)
-        connection.post("/pair-pin-start", HEADERS)
+    /**
+     * Step 1: shows the PIN on screen (Apple TV) and runs M1/M2. [showPin] false skips
+     * /pair-pin-start when one was just sent: every call makes the receiver pick a new code.
+     */
+    fun startSetup(showPin: Boolean = true) {
+        if (showPin) {
+            // Macs/Apple TVs hold this request while their prompt is on screen.
+            connection.setReadTimeout(60_000)
+            val start = connection.post("/pair-pin-start", HEADERS)
+            // A Mac answers 400 when its Accept prompt was declined or timed out: no code is shown.
+            if (start.statusCode != 200) throw java.net.SocketTimeoutException("pair-pin-start: HTTP ${start.statusCode}")
+        }
         connection.setReadTimeout(10_000)
         val m1 = Tlv8().apply {
             add(TLV_METHOD, byteArrayOf(0x00))
@@ -67,7 +74,12 @@ class HapPairing(private val connection: AirPlay2Connection) {
         val resp = connection.post("/pair-setup", HEADERS, m1)
         if (resp.statusCode != 200) throw PairingException("pair-setup M1 rejected: HTTP ${resp.statusCode}")
         val m2 = Tlv8.decode(resp.body)
-        m2[TLV_ERROR]?.let { throw PairingException("pair-setup M2 error ${it.firstOrNull()}") }
+        m2[TLV_ERROR]?.let {
+            // 3 = backoff: too many failed codes, the receiver refuses pairing for a while.
+            val delay = m2[TLV_RETRY_DELAY]?.foldIndexed(0L) { i, acc, b -> acc or ((b.toLong() and 0xFF) shl (8 * i)) } // little-endian
+            if (it.firstOrNull()?.toInt() == 3) throw PairingException("too many wrong codes; try again in ${delay ?: "a few"} s")
+            throw PairingException("pair-setup M2 error ${it.firstOrNull()}")
+        }
         salt = m2[TLV_SALT] ?: throw PairingException("M2 missing salt")
         serverSrpPublic = m2[TLV_PUBLIC_KEY] ?: throw PairingException("M2 missing public key")
     }
@@ -82,7 +94,10 @@ class HapPairing(private val connection: AirPlay2Connection) {
             add(TLV_PROOF, srp.proof())
         }.encode()
         val m4 = Tlv8.decode(connection.post("/pair-setup", HEADERS, m3).body)
-        m4[TLV_ERROR]?.let { throw PairingException("wrong code", wrongPin = true) }
+        m4[TLV_ERROR]?.let {
+            LogServer.d(TAG, "pair-setup M4 error ${it.firstOrNull()} (salt ${salt!!.size} B, server key ${serverSrpPublic!!.size} B)")
+            throw PairingException("wrong code", wrongPin = true)
+        }
         val k = srp.sharedKey()
 
         // M5: our long-term Ed25519 identity, signed, encrypted with the setup session key.
@@ -176,6 +191,7 @@ class HapPairing(private val connection: AirPlay2Connection) {
         private const val TLV_ENCRYPTED_DATA = 0x05
         private const val TLV_SEQNO = 0x06
         private const val TLV_ERROR = 0x07
+        private const val TLV_RETRY_DELAY = 0x08
         private const val TLV_SIGNATURE = 0x0A
 
         // pyatv protocols/airplay/auth/hap.py _AIRPLAY_HEADERS (HKP 3 = system pairing)

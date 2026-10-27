@@ -170,16 +170,20 @@ class AirPlay2Sink(
             } catch (e: Exception) {
                 if (pinProvider == null) throw e
                 LogServer.d(TAG, "$displayName: transient pairing rejected (${e.message}); pairing with a code")
+                // Its /pair-pin-start already put a code on screen (Macs). That code belongs to
+                // this connection (closing it discards it) and asking again picks a new one, so
+                // carry on here with plain pair-setup.
+                if (pairing.pinStarted) return pairWithCode(showPin = false)
                 connection.reopen()
             }
         }
         return pairWithCode()
     }
 
-    private fun pairWithCode(): ByteArray {
+    private fun pairWithCode(showPin: Boolean = true): ByteArray {
         val setup = HapPairing(connection)
         try {
-            setup.startSetup() // an Apple TV shows the code now
+            setup.startSetup(showPin) // an Apple TV shows the code now
         } catch (e: SocketTimeoutException) {
             throw SinkException(SinkError.NEEDS_ACCEPT, "Accept the request on $displayName, then try pairing again", e)
         }

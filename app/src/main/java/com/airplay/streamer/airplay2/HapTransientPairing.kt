@@ -23,6 +23,10 @@ class HapTransientPairing(private val connection: AirPlay2Connection) {
     var pinStartMillis: Long = 0
         private set
 
+    /** True once /pair-pin-start was answered (a Mac then has a code on screen). */
+    var pinStarted = false
+        private set
+
     /** Run the transient pairing exchange and enable control-channel encryption. */
     fun pair() {
         // Macs (and Apple TVs set to "ask") show an Accept prompt while this request is
@@ -32,6 +36,7 @@ class HapTransientPairing(private val connection: AirPlay2Connection) {
         val t0 = System.currentTimeMillis()
         connection.post("/pair-pin-start", HKP_HEADERS)
         pinStartMillis = System.currentTimeMillis() - t0
+        pinStarted = true
 
         // M1: start transient pair-setup
         val m1 = Tlv8().apply {
