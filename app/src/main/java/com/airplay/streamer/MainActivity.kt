@@ -75,8 +75,11 @@ class MainActivity : AppCompatActivity() {
         setupList()
         setupControls()
         observe()
-        // Without this Android 17+ hides every speaker: ask right away.
-        if (savedInstanceState == null && Prefs.needsLocalNetworkPermission(this)) {
+        // Without this Android 17+ hides every speaker: ask right away. With Shizuku installed
+        // the setup card's one tap grants it (its binder isn't connected yet at this point).
+        if (savedInstanceState == null && Prefs.needsLocalNetworkPermission(this) &&
+            ShizukuManager.status.value == ShizukuManager.Status.NOT_INSTALLED
+        ) {
             permissionLauncher.launch(arrayOf(Prefs.LOCAL_NETWORK))
         }
     }
@@ -407,9 +410,10 @@ class MainActivity : AppCompatActivity() {
         val needsProjectionApproval = !ShizukuManager.projectionPreApproved(this)
         val hasListener = MediaInfoTracker.hasNotificationAccess(this)
         return when {
-            Prefs.needsLocalNetworkPermission(this) -> Setup.LOCAL_NETWORK
             shizuku == ShizukuManager.Status.NO_PERMISSION -> Setup.SHIZUKU_PERMISSION
+            // One Shizuku tap grants local network too, so it goes first when available.
             shizuku == ShizukuManager.Status.READY && (needsProjectionApproval || !hasListener || !StreamController.hasRuntimePermissions(this)) -> Setup.SHIZUKU_SETUP
+            Prefs.needsLocalNetworkPermission(this) -> Setup.LOCAL_NETWORK
             !StreamController.hasRuntimePermissions(this) -> Setup.PERMISSIONS
             !hasListener && prefs.showNowPlaying -> Setup.NOTIFICATION_ACCESS
             shizuku == ShizukuManager.Status.NOT_INSTALLED && needsProjectionApproval &&
@@ -456,10 +460,14 @@ class MainActivity : AppCompatActivity() {
                     lifecycleScope.launch {
                         val report = ShizukuManager.setupPermissions()
                         viewModel.refreshTracker()
+                        // Local network may have just been granted: discovery started without it.
+                        viewModel.refreshDiscovery()
                         MaterialAlertDialogBuilder(this@MainActivity)
                             .setTitle(R.string.setup_done)
                             .setMessage(report)
                             .setPositiveButton(R.string.ok, null)
+                            // The listener grant shows up in settings a moment later than the others.
+                            .setOnDismissListener { updateSetupCard() }
                             .show()
                         updateSetupCard()
                     }
