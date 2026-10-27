@@ -100,7 +100,7 @@ bottom line: excellent quality, but not bit-perfect hi-res. cd quality (16-bit/4
 
 ### from release
 
-download `centuryplay-v2.0.apk` from the [latest release](https://github.com/g8row/centuryplay/releases/latest). it installs over v1.x.
+download `centuryplay-v2.1.0.apk` from the [latest release](https://github.com/g8row/centuryplay/releases/latest). it installs over v2.0 and v1.x.
 every push to master also builds a debug apk (actions → build → artifacts).
 
 ## usage
@@ -154,10 +154,16 @@ see [docs/airplay_protocol.md](docs/AIRPLAY_PROTOCOL.md) for detailed protocol d
 ## limitations
 
 - some apps block audio capture (netflix, apple music on android) — centuryplay tells you when that happens.
-- latency: ~2 s by default (adjustable 0.5–4 s); use the per-speaker audio delay to line up speakers or video.
+- latency: ~0.2 s by default (adjustable 0.15–4 s; raise it if speakers drop out on busy wi-fi); use the per-speaker audio delay to line up speakers or video.
 - fairplay-only receivers can't be supported.
 
 ## changelog
+
+### v2.1.0 (october 2026)
+- casting from other apps (youtube music, output switcher) works every time, not only the first (#9).
+- android 17: speakers are found again (local network / nearby devices permission, #10); shizuku setup grants it too.
+- homepod mini setup fix, android 11 tv capture and volume-down fixes, 0.2 s default latency (#15, #16).
+- no second player in the media controls; 16 kb page size compatible; mac code-pairing fixes.
 
 ### v2.0 (september 2026)
 - new streaming engine: alac, resends, drift-free sync, multi-room, auto-reconnect, metadata + artwork.
