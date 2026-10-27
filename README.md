@@ -43,8 +43,10 @@ centuryplay completes the chain by letting android devices stream system audio t
 
 ### does it work with apple music?
 
-no — apple music on android only allows its audio to be captured by the system itself, and android restricts that
-kind of capture to 16 khz mono. most other apps (e.g. spotify, youtube music, vlc, podcast apps, browsers) work; the app tells you when one blocks capture.
+yes, with [shizuku](https://shizuku.rikka.app/): shizuku mode reroutes the media audio to centuryplay instead of
+recording it, and that includes apps like apple music that only allow capture by the system. without shizuku, apple music
+blocks capture (android would only give 16 khz mono); most other apps (e.g. spotify, youtube music, vlc, podcast apps,
+browsers) work either way, and the app tells you when one blocks capture.
 
 ### android audio resampling
 
@@ -153,7 +155,7 @@ see [docs/airplay_protocol.md](docs/AIRPLAY_PROTOCOL.md) for detailed protocol d
 
 ## limitations
 
-- some apps block audio capture (netflix, apple music on android) — centuryplay tells you when that happens.
+- some apps block audio capture (netflix; apple music unless you use shizuku mode) — centuryplay tells you when that happens.
 - latency: ~0.2 s by default (adjustable 0.15–4 s; raise it if speakers drop out on busy wi-fi); use the per-speaker audio delay to line up speakers or video.
 - fairplay-only receivers can't be supported.
 
