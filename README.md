@@ -100,7 +100,7 @@ bottom line: excellent quality, but not bit-perfect hi-res. cd quality (16-bit/4
 
 ### from release
 
-download `centuryplay-v2.1.0.apk` from the [latest release](https://github.com/g8row/centuryplay/releases/latest). it installs over v2.0 and v1.x.
+download `centuryplay-v2.1.1.apk` from the [latest release](https://github.com/g8row/centuryplay/releases/latest). it installs over v2.0 and v1.x.
 every push to master also builds a debug apk (actions → build → artifacts).
 
 ## usage
@@ -158,6 +158,10 @@ see [docs/airplay_protocol.md](docs/AIRPLAY_PROTOCOL.md) for detailed protocol d
 - fairplay-only receivers can't be supported.
 
 ## changelog
+
+### v2.1.1 (october 2026)
+- tablet layout: speakers in a two-column grid, and in landscape a full-height player with big artwork.
+- volume buttons control the speakers on android 17 while the music app is playing.
 
 ### v2.1.0 (october 2026)
 - casting from other apps (youtube music, output switcher) works every time, not only the first (#9).
