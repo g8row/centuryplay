@@ -102,7 +102,7 @@ bottom line: excellent quality, but not bit-perfect hi-res. cd quality (16-bit/4
 
 ### from release
 
-download `centuryplay-v2.1.1.apk` from the [latest release](https://github.com/g8row/centuryplay/releases/latest). it installs over v2.0 and v1.x.
+download `centuryplay-v2.1.2.apk` from the [latest release](https://github.com/g8row/centuryplay/releases/latest). it installs over v2.0 and v1.x.
 every push to master also builds a debug apk (actions → build → artifacts).
 
 ## usage
@@ -160,6 +160,10 @@ see [docs/airplay_protocol.md](docs/AIRPLAY_PROTOCOL.md) for detailed protocol d
 - fairplay-only receivers can't be supported.
 
 ## changelog
+
+### v2.1.2 (october 2026)
+- shizuku at the top of settings: its state, what it unlocks (apple music, no capture prompt, silent phone, auto-play) and the next step.
+- the shizuku prompt also shows when shizuku is installed but not running; dismiss hides it for good.
 
 ### v2.1.1 (october 2026)
 - tablet layout: speakers in a two-column grid, and in landscape a full-height player with big artwork.
