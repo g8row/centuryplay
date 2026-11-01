@@ -172,8 +172,9 @@ class AirPlay2Sink(
                 LogServer.d(TAG, "$displayName: transient pairing rejected (${e.message}); pairing with a code")
                 // Its /pair-pin-start already put a code on screen (Macs). That code belongs to
                 // this connection (closing it discards it) and asking again picks a new one, so
-                // carry on here with plain pair-setup.
-                if (pairing.pinStarted) return pairWithCode(showPin = false)
+                // carry on here with plain pair-setup. An Apple TV's 470 drops that attempt, so
+                // its code must come from a fresh system /pair-pin-start, as pyatv does.
+                if (pairing.pinStarted && pairing.rejectedStatus != 470) return pairWithCode(showPin = false)
                 connection.reopen()
             }
         }
