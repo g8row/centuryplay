@@ -111,6 +111,16 @@ every push to master also builds a debug apk (actions → build → artifacts).
 2. the first time, android asks to allow audio capture (skipped entirely with shizuku).
 3. from then on you can also use the media controls' output picker, the quick settings tile, the widget or the volume buttons.
 
+### skip the capture prompt without shizuku (adb)
+
+connect the phone once with usb debugging on and run:
+
+```bash
+adb shell appops set com.airplay.streamer PROJECT_MEDIA allow
+```
+
+android then stops asking for the screen-capture approval (`... PROJECT_MEDIA default` undoes it). this only skips the prompt: it doesn't reroute audio or bypass apps that block capture, which is what shizuku is for. some manufacturers ignore or reset it. (tip from [vistvan20002-cpu's fork](https://github.com/vistvan20002-cpu/centuryplay).)
+
 ### shizuku (recommended)
 
 install and start [shizuku](https://shizuku.rikka.app/), then tap "set up" on the card in centuryplay. it grants, once:
