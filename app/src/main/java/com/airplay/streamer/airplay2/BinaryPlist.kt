@@ -23,6 +23,10 @@ object BinaryPlist {
     fun encode(map: Map<String, Any?>): ByteArray =
         BinaryPropertyListWriter.writeToArray(toNs(map))
 
+    /** Encode a list as a binary plist with an array root (SETPEERS). */
+    fun encodeArray(list: List<Any?>): ByteArray =
+        BinaryPropertyListWriter.writeToArray(toNs(list))
+
     /** Parse a binary plist body into an NSDictionary. */
     fun decode(bytes: ByteArray): NSDictionary =
         PropertyListParser.parse(bytes) as NSDictionary

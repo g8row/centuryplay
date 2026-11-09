@@ -40,6 +40,7 @@ data class SessionSettings(
     val preferPcm: Boolean = false,
     val preferAirPlay2: Boolean = false,
     val senderName: String = "centuryplay",
+    val clockMode: ClockMode = ClockMode.AUTO,
 )
 
 /**
@@ -178,6 +179,7 @@ class StreamSession(
                     hapStore = hapStore,
                     pinProvider = { requestPin(device, entry.volume) },
                     forcePin = usePin,
+                    clockMode = settings.clockMode,
                 )
             } catch (e: SinkException) {
                 setSpeaker(device, SpeakerStatus.FAILED, entry.volume, transport, e.message)

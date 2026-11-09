@@ -94,6 +94,12 @@ class Prefs(context: Context) {
         get() = raw.getBoolean("external_control", false)
         set(v) = raw.edit().putBoolean("external_control", v).apply()
 
+    /** AirPlay 2 timing protocol (auto = PTP only where NTP is known not to work). */
+    var clockMode: com.airplay.streamer.engine.ClockMode
+        get() = runCatching { com.airplay.streamer.engine.ClockMode.valueOf(raw.getString("clock_mode", null) ?: "AUTO") }
+            .getOrDefault(com.airplay.streamer.engine.ClockMode.AUTO)
+        set(v) = raw.edit().putString("clock_mode", v.name).apply()
+
     var debugLogServer: Boolean
         get() = raw.getBoolean("debug_mode", false)
         set(v) = raw.edit().putBoolean("debug_mode", v).apply()

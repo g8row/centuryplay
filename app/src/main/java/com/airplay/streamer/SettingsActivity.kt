@@ -139,6 +139,21 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         section("advanced")
+        action("airplay 2 clock", { "${prefs.clockMode.name.lowercase()} — " + when (prefs.clockMode) {
+            com.airplay.streamer.engine.ClockMode.AUTO -> "ptp for sonos and shairport-sync, ntp for the rest"
+            com.airplay.streamer.engine.ClockMode.NTP -> "ntp for every airplay 2 speaker"
+            com.airplay.streamer.engine.ClockMode.PTP -> "ptp for every speaker that supports it (experimental)"
+        } }) {
+            val modes = com.airplay.streamer.engine.ClockMode.values()
+            MaterialAlertDialogBuilder(this)
+                .setTitle("airplay 2 clock")
+                .setSingleChoiceItems(modes.map { it.name.lowercase() }.toTypedArray(), modes.indexOf(prefs.clockMode)) { d, i ->
+                    prefs.clockMode = modes[i]
+                    d.dismiss()
+                    recreate()
+                }
+                .show()
+        }
         switch("allow external control", "let home assistant, tasker or adb start and stop streaming and set the volume. any app on the phone could then do this.", prefs.externalControl) { prefs.externalControl = it }
         action("external control commands", { "how to send them from home assistant, tasker or adb" }) {
             val text = """

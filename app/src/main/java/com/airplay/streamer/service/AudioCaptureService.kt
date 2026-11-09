@@ -307,6 +307,7 @@ class AudioCaptureService : Service() {
             preferPcm = prefs.preferPcm,
             preferAirPlay2 = prefs.preferAirPlay2,
             senderName = prefs.senderName,
+            clockMode = prefs.clockMode,
         )
         val s = StreamSession(
             scope, settings,
