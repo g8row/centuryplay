@@ -456,10 +456,12 @@ class AirPlay2Sink(
         p[0] = if (first) 0x90.toByte() else 0x80.toByte()
         p[1] = 0xD7.toByte()
         p[2] = 0x00; p[3] = 0x06
+        // In the time of whichever grandmaster rules the domain (ours, or a receiver's that won).
+        val (clock, time) = PtpMaster.timeAnnouncement(now)
         RaopSink.putInt(p, 4, rtp(current - context.latencyFrames))
-        for (i in 0 until 8) p[8 + i] = (now ushr (56 - 8 * i)).toByte()
+        for (i in 0 until 8) p[8 + i] = (time ushr (56 - 8 * i)).toByte()
         RaopSink.putInt(p, 16, rtp(current))
-        for (i in 0 until 8) p[20 + i] = (PtpMaster.clockId ushr (56 - 8 * i)).toByte()
+        for (i in 0 until 8) p[20 + i] = (clock ushr (56 - 8 * i)).toByte()
         return p
     }
 
@@ -508,7 +510,7 @@ class AirPlay2Sink(
         if (diagnosticsLogged >= due.size || elapsed < due[diagnosticsLogged]) return
         diagnosticsLogged++
         val other = otherControl.entries.joinToString { "0x%02X×%d".format(it.key, it.value) }.ifEmpty { "none" }
-        val timing = if (usePtp) "ptp messages received=${PtpMaster.received.get()}${if (PtpMaster.boundStandardPorts) "" else " (ephemeral ports)"}"
+        val timing = if (usePtp) "${PtpMaster.summary()}${if (PtpMaster.boundStandardPorts) "" else " (ephemeral ports)"}"
             else "timing requests=${timingServer.requests.get()}" +
                 (timingServer.firstFrom?.let { " (from $it)" } ?: " (none: receiver isn't using our NTP clock)")
         LogServer.d(

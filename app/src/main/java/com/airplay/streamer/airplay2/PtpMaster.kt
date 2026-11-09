@@ -76,8 +76,56 @@ object PtpMaster {
 
     /** Messages received from receivers (diagnostics). */
     val received = AtomicInteger()
+    private val receivedByType = java.util.concurrent.atomic.AtomicIntegerArray(16)
     @Volatile var boundStandardPorts = false
         private set
+
+    // ---- following a better grandmaster (e.g. a Sonos that wins the best-master election)
+
+    /** BMCA dataset of an Announce: lower compares better (IEEE 1588 9.3.4, identity last). */
+    private data class Dataset(val priority1: Int, val clockClass: Int, val accuracy: Int, val variance: Int, val priority2: Int, val gmIdentity: Long) {
+        fun betterThan(o: Dataset): Boolean {
+            val a = intArrayOf(priority1, clockClass, accuracy, variance, priority2)
+            val b = intArrayOf(o.priority1, o.clockClass, o.accuracy, o.variance, o.priority2)
+            for (i in a.indices) if (a[i] != b[i]) return a[i] < b[i]
+            return java.lang.Long.compareUnsigned(gmIdentity, o.gmIdentity) < 0
+        }
+        override fun toString() = "gm %016x p1=%d class=%d acc=0x%02x var=0x%04x p2=%d".format(gmIdentity, priority1, clockClass, accuracy, variance, priority2)
+    }
+
+    private val ours get() = Dataset(128, 6, 0x21, 0x436A, 128, clockId)
+    @Volatile private var bestForeign: Dataset? = null
+
+    /** Grandmaster time minus our [NtpClock] time (ns), from the followed master's Sync/Follow_Up. */
+    @Volatile private var gmOffsetNs: Long? = null
+    private val offsetSamples = ArrayDeque<Long>()
+    // Written by the event-port thread (Sync), read by the general-port thread (Follow_Up).
+    @Volatile private var pendingSyncSeq = -1
+    @Volatile private var pendingSyncAt = 0L
+    @Volatile private var pendingSyncCorrection = 0L
+
+    /** The grandmaster receivers follow: a peer's clock if it wins the election, else ours. */
+    private val followed: Dataset? get() = bestForeign?.takeIf { it.betterThan(ours) }
+
+    /**
+     * Clock ID and current time for 0xD7 time announcements. While a better master (from a
+     * receiver) rules the PTP domain, receivers only understand times on *its* clock, as an
+     * Apple sender joining such a group does; until its offset is known we fall back to ours.
+     */
+    fun timeAnnouncement(nowNanos: Long): Pair<Long, Long> {
+        val gm = followed
+        val offset = gmOffsetNs
+        return if (gm != null && offset != null) gm.gmIdentity to (nowNanos + offset) else clockId to nowNanos
+    }
+
+    /** One-line PTP state for the diagnostics. */
+    fun summary(): String {
+        val names = mapOf(0 to "sync", 1 to "delayReq", 2 to "pdelayReq", 8 to "followUp", 11 to "announce", 12 to "signaling")
+        val counts = (0 until 16).filter { receivedByType[it] > 0 }.joinToString(" ") { "${names[it] ?: "0x%x".format(it)}=${receivedByType[it]}" }
+        val gm = followed
+        val master = if (gm == null) "master=us" else "master=peer ($gm), offset=${gmOffsetNs?.let { "${it / 1_000_000} ms" } ?: "unknown"}"
+        return "ptp rx [${counts.ifEmpty { "none" }}] $master"
+    }
 
     fun addPeer(address: InetAddress) {
         synchronized(lock) {
@@ -103,6 +151,10 @@ object PtpMaster {
         eventSocket = event
         generalSocket = general
         boundStandardPorts = std1 && std2
+        bestForeign = null
+        gmOffsetNs = null
+        synchronized(offsetSamples) { offsetSamples.clear() }
+        for (i in 0 until 16) receivedByType.set(i, 0)
         running = true
         LogServer.d(
             TAG, "started, clock id %016x, %s".format(
@@ -216,19 +268,97 @@ object PtpMaster {
                 if (received.incrementAndGet() == 1) {
                     LogServer.d(TAG, "first message from ${pkt.address.hostAddress}:${pkt.port} type 0x%x".format(buf[0].toInt() and 0x0F))
                 }
-                when (buf[0].toInt() and 0x0F) {
+                val type = buf[0].toInt() and 0x0F
+                receivedByType.incrementAndGet(type)
+                when (type) {
+                    MSG_ANNOUNCE -> if (pkt.length >= 64) onAnnounce(buf, pkt.address)
+                    MSG_SYNC -> if (pkt.length >= 44) onSync(buf, at)
+                    MSG_FOLLOW_UP -> if (pkt.length >= 44) onFollowUp(buf)
                     MSG_DELAY_REQ -> answer(MSG_DELAY_RESP, FLAG_UNICAST or FLAG_TIMESCALE or FLAG_TWO_STEP, buf, at, pkt.address, GENERAL_PORT, generalSocket)
                     MSG_PDELAY_REQ -> {
                         answer(MSG_PDELAY_RESP, FLAG_UNICAST or FLAG_TIMESCALE or FLAG_TWO_STEP, buf, at, pkt.address, EVENT_PORT, eventSocket)
                         answer(MSG_PDELAY_RESP_FOLLOW_UP, FLAG_UNICAST or FLAG_TIMESCALE, buf, NtpClock.nowNanos(), pkt.address, GENERAL_PORT, generalSocket)
                     }
-                    // Announce/Sync from others: we claim the best clock, so ignore (as libairptp).
                     else -> Unit
                 }
             } catch (_: Exception) {
                 if (!running || socket.isClosed) break
             }
         }
+    }
+
+    private fun onAnnounce(b: ByteArray, from: InetAddress) {
+        val ds = Dataset(
+            priority1 = b[47].toInt() and 0xFF,
+            clockClass = b[48].toInt() and 0xFF,
+            accuracy = b[49].toInt() and 0xFF,
+            variance = ((b[50].toInt() and 0xFF) shl 8) or (b[51].toInt() and 0xFF),
+            priority2 = b[52].toInt() and 0xFF,
+            gmIdentity = readLong(b, 53),
+        )
+        if (ds.gmIdentity == clockId) return // a receiver relaying our own clock
+        val previous = bestForeign
+        if (previous == null || ds.betterThan(previous) || ds.gmIdentity == previous.gmIdentity) bestForeign = ds
+        if (previous?.gmIdentity != ds.gmIdentity || previous == null) {
+            val wins = ds.betterThan(ours)
+            LogServer.d(TAG, "announce from ${from.hostAddress}: $ds → ${if (wins) "it wins the election; following its clock" else "ours is better"}")
+        }
+    }
+
+    private fun sourceClock(b: ByteArray) = readLong(b, 20)
+
+    /** Sync from the followed master: remember when it arrived (two-step) or use its timestamp (one-step). */
+    private fun onSync(b: ByteArray, at: Long) {
+        val gm = followed ?: return
+        if (sourceClock(b) != gm.gmIdentity) return
+        val seq = ((b[30].toInt() and 0xFF) shl 8) or (b[31].toInt() and 0xFF)
+        val twoStep = (b[6].toInt() and 0x02) != 0 // flags bit 9
+        val correction = readLong(b, 8) shr 16 // scaled ns → ns
+        if (twoStep) {
+            pendingSyncAt = at; pendingSyncCorrection = correction
+            pendingSyncSeq = seq // last: publishes the two above to the Follow_Up thread
+        } else {
+            addOffsetSample(readTimestamp(b, 34) + correction - at)
+        }
+    }
+
+    /** Follow_Up: precise origin time of the matching Sync, as nqptp handle_follow_up(). */
+    private fun onFollowUp(b: ByteArray) {
+        val gm = followed ?: return
+        if (sourceClock(b) != gm.gmIdentity) return
+        val seq = ((b[30].toInt() and 0xFF) shl 8) or (b[31].toInt() and 0xFF)
+        if (seq != pendingSyncSeq) return
+        val correction = readLong(b, 8) shr 16
+        addOffsetSample(readTimestamp(b, 34) + pendingSyncCorrection + correction - pendingSyncAt)
+    }
+
+    /**
+     * Network delay only ever makes a sample smaller (the Sync arrives later), so take the
+     * largest of the recent ones, as nqptp's filtering does in spirit.
+     */
+    private fun addOffsetSample(sample: Long) {
+        synchronized(offsetSamples) {
+            offsetSamples.addLast(sample)
+            while (offsetSamples.size > 32) offsetSamples.removeFirst()
+            val first = gmOffsetNs == null
+            gmOffsetNs = offsetSamples.max()
+            if (first) LogServer.d(TAG, "following master %016x, offset %d ms".format(followed?.gmIdentity ?: 0, gmOffsetNs!! / 1_000_000))
+        }
+    }
+
+    private fun readLong(b: ByteArray, at: Int): Long {
+        var v = 0L
+        for (i in 0 until 8) v = (v shl 8) or (b[at + i].toLong() and 0xFF)
+        return v
+    }
+
+    private fun readTimestamp(b: ByteArray, at: Int): Long {
+        val hi = ((b[at].toLong() and 0xFF) shl 8) or (b[at + 1].toLong() and 0xFF)
+        var lo = 0L
+        for (i in 0 until 4) lo = (lo shl 8) or (b[at + 2 + i].toLong() and 0xFF)
+        var ns = 0L
+        for (i in 0 until 4) ns = (ns shl 8) or (b[at + 6 + i].toLong() and 0xFF)
+        return ((hi shl 32) or lo) * 1_000_000_000L + ns
     }
 
     /** Delay_Resp / Pdelay_Resp(_Follow_Up): our timestamp + the requester's port identity. */
