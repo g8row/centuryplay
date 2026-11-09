@@ -83,6 +83,8 @@ import java.io.ByteArrayOutputStream
 class AudioCaptureService : Service() {
 
     companion object {
+        @Volatile private var shizukuAlertShown = false
+
         private const val NOTIFICATION_ID = 1
         private const val CHANNEL_ID = "airplay_streaming"
         private const val ALERT_CHANNEL_ID = "airplay_alerts"
@@ -351,7 +353,11 @@ class AudioCaptureService : Service() {
                 // Shizuku runs and we have permission, but its helper never handed the service over:
                 // typically the Shizuku app outlived a server restart and lost its link to the server.
                 LogServer.log("Shizuku: privileged service didn't connect, falling back to MediaProjection")
-                notifyAlert(getString(R.string.alert_shizuku_unresponsive))
+                // Once per app process: it stays broken until the user restarts Shizuku.
+                if (!shizukuAlertShown) {
+                    shizukuAlertShown = true
+                    notifyAlert(getString(R.string.alert_shizuku_unresponsive))
+                }
             }
         }
         reroutedCapture = false
