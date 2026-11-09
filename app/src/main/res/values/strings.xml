@@ -20,6 +20,7 @@
     <string name="channel_alerts">alerts</string>
     <string name="alert_capture_stopped">streaming stopped: audio capture permission was revoked</string>
     <string name="alert_need_consent">open centuryplay to allow audio capture</string>
+    <string name="alert_shizuku_unresponsive">shizuku isn\'t responding, so screen capture is used instead. force-stop the shizuku app, open it again, then reconnect.</string>
     <string name="alert_auto_stopped">streaming stopped after %d minutes of silence</string>
     <string name="alert_capture_blocked">%1$s doesn\'t allow other apps to capture its audio. set up shizuku in centuryplay to stream it anyway.</string>
     <string name="alert_capture_blocked_hard">%1$s blocks audio capture completely (drm), so it can\'t be streamed.</string>

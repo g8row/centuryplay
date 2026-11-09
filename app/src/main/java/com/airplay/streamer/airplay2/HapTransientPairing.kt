@@ -27,6 +27,10 @@ class HapTransientPairing(private val connection: AirPlay2Connection) {
     var pinStarted = false
         private set
 
+    /** HTTP status of a rejected transient M1 (403 from a limited Mac, 470 from an Apple TV). */
+    var rejectedStatus: Int? = null
+        private set
+
     /** Run the transient pairing exchange and enable control-channel encryption. */
     fun pair() {
         // Macs (and Apple TVs set to "ask") show an Accept prompt while this request is
@@ -47,6 +51,7 @@ class HapTransientPairing(private val connection: AirPlay2Connection) {
         val m2Resp = connection.post("/pair-setup", HKP_HEADERS, m1)
         if (m2Resp.statusCode != 200) {
             // e.g. 403 from a Mac whose "Allow AirPlay for" is limited to the current user.
+            rejectedStatus = m2Resp.statusCode
             throw IllegalStateException("pair-setup M1 rejected with HTTP ${m2Resp.statusCode} (receiver access control?)")
         }
         val m2 = Tlv8.decode(m2Resp.body)

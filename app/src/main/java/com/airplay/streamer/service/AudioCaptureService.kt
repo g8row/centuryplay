@@ -347,6 +347,11 @@ class AudioCaptureService : Service() {
                 } catch (e: Exception) {
                     LogServer.log("Shizuku capture failed, falling back to MediaProjection: ${e.message}")
                 }
+            } else if (ShizukuManager.status.value == ShizukuManager.Status.READY) {
+                // Shizuku runs and we have permission, but its helper never handed the service over:
+                // typically the Shizuku app outlived a server restart and lost its link to the server.
+                LogServer.log("Shizuku: privileged service didn't connect, falling back to MediaProjection")
+                notifyAlert(getString(R.string.alert_shizuku_unresponsive))
             }
         }
         reroutedCapture = false
