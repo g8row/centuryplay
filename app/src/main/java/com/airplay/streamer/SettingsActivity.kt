@@ -139,6 +139,32 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         section("advanced")
+        switch("allow external control", "let home assistant, tasker or adb start and stop streaming and set the volume. any app on the phone could then do this.", prefs.externalControl) { prefs.externalControl = it }
+        action("external control commands", { "how to send them from home assistant, tasker or adb" }) {
+            val text = """
+                |broadcast (or activity) actions:
+                |com.airplay.streamer.action.START   device = speaker name (comma-separate several; none = last used)
+                |com.airplay.streamer.action.STOP    device = optional, only those speakers
+                |com.airplay.streamer.action.TOGGLE
+                |com.airplay.streamer.action.SET_VOLUME   volume = 0-100, device = optional
+                |
+                |adb:
+                |adb shell am broadcast -a com.airplay.streamer.action.START --es device "Kitchen"
+                |
+                |without shizuku, send it as an activity (home assistant command_activity, or am start) so the capture prompt can show.
+                |
+                |results come back as a com.airplay.streamer.action.RESULT broadcast (action, success, message).
+            """.trimMargin()
+            MaterialAlertDialogBuilder(this)
+                .setTitle("external control")
+                .setMessage(text)
+                .setPositiveButton("copy") { _, _ ->
+                    val cm = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("centuryplay", text))
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+        }
         switch("debug log server", "serve logs at http://<phone-ip>:8080 on your wi-fi. leave off unless debugging.", prefs.debugLogServer) {
             prefs.debugLogServer = it
             if (it) LogServer.start() else LogServer.stop()

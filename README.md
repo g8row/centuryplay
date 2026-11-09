@@ -121,6 +121,27 @@ adb shell appops set com.airplay.streamer PROJECT_MEDIA allow
 
 android then stops asking for the screen-capture approval (`... PROJECT_MEDIA default` undoes it). this only skips the prompt: it doesn't reroute audio or bypass apps that block capture, which is what shizuku is for. some manufacturers ignore or reset it. (tip from [vistvan20002-cpu's fork](https://github.com/vistvan20002-cpu/centuryplay).)
 
+### control from home assistant, tasker or adb
+
+turn on **settings → allow external control** (off by default: any app on the phone can then send these). actions:
+
+| action | extras |
+|---|---|
+| `com.airplay.streamer.action.START` | `device`: speaker name, comma-separated for several; none = the speakers used last time |
+| `com.airplay.streamer.action.STOP` | `device` (optional): only those speakers |
+| `com.airplay.streamer.action.TOGGLE` | |
+| `com.airplay.streamer.action.SET_VOLUME` | `volume`: 0-100; `device` (optional): only those speakers, else all |
+
+```bash
+adb shell am broadcast -a com.airplay.streamer.action.START --es device "Kitchen"
+adb shell am broadcast -a com.airplay.streamer.action.SET_VOLUME --ei volume 30
+```
+
+home assistant companion app: `command_broadcast_intent` with `intent_package_name: com.airplay.streamer` and the action above, or `command_activity`.
+broadcasts can only start streaming when capture needs no prompt (shizuku, or the adb appops command); send the
+command as an activity (`command_activity`, `am start -a …`) and centuryplay can show the prompt itself.
+each command answers with a `com.airplay.streamer.action.RESULT` broadcast (`action`, `success`, `message`) for tasker.
+
 ### shizuku (recommended)
 
 install and start [shizuku](https://shizuku.rikka.app/), then tap "set up" on the card in centuryplay. it grants, once:

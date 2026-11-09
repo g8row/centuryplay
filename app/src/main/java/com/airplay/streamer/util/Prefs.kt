@@ -89,6 +89,11 @@ class Prefs(context: Context) {
         get() = raw.getBoolean("system_switcher", true)
         set(v) = raw.edit().putBoolean("system_switcher", v).apply()
 
+    /** Let other apps (Home Assistant, Tasker, adb) start/stop streaming and set volume (issue #13). */
+    var externalControl: Boolean
+        get() = raw.getBoolean("external_control", false)
+        set(v) = raw.edit().putBoolean("external_control", v).apply()
+
     var debugLogServer: Boolean
         get() = raw.getBoolean("debug_mode", false)
         set(v) = raw.edit().putBoolean("debug_mode", v).apply()

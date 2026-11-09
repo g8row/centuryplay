@@ -61,6 +61,35 @@
             </intent-filter>
         </activity>
 
+        <!-- External control (issue #13); ignored unless enabled in settings. -->
+        <activity
+            android:name=".service.ExternalControlActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.AirPlayStreamer.Transparent">
+            <intent-filter>
+                <action android:name="com.airplay.streamer.action.START" />
+                <action android:name="com.airplay.streamer.action.STOP" />
+                <action android:name="com.airplay.streamer.action.TOGGLE" />
+                <action android:name="com.airplay.streamer.action.SET_VOLUME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <receiver
+            android:name=".service.ExternalControlReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.airplay.streamer.action.START" />
+                <action android:name="com.airplay.streamer.action.STOP" />
+                <action android:name="com.airplay.streamer.action.TOGGLE" />
+                <action android:name="com.airplay.streamer.action.SET_VOLUME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </receiver>
+
         <activity
             android:name=".SettingsActivity"
             android:exported="false"
