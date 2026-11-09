@@ -172,3 +172,26 @@ a small native binary compiled via ndk that:
 - [nqptp source code](https://github.com/mikebrady/nqptp)
 - [ap2-sender (python)](https://github.com/openairplay/ap2-sender)
 - [shizuku documentation](https://shizuku.rikka.app/)
+
+## PTP timing (v2.2)
+
+Receivers that only follow PTP (shairport-sync AP2 via nqptp; Sonos accepts NTP sessions but stays
+silent, issue #3) get PTP timing; Settings → airplay 2 clock picks auto (PTP for Sonos and
+shairport-sync), ntp or ptp (every receiver with feature bit 41, like OwnTone).
+
+- `airplay2/PtpMaster.kt` is a Kotlin port of OwnTone's libairptp (MIT): unicast two-step
+  Sync + Follow_Up every 125 ms to the peer's 319/320, Announce (clock class 6 so we win BMCA) and
+  Apple's Signaling every second, Delay_Resp / Pdelay_Resp answers. Time base is `NtpClock`.
+- Session SETUP sends `timingProtocol: PTP`, `timingPeerInfo` / `timingPeerList` (OwnTone
+  payload_make_setup_session_ptp); the receiver's `timingPeerInfo.Addresses` becomes the PTP peer.
+  Order as OwnTone: SETUP session → RECORD → SETPEERS (bplist array, Content-Type
+  `/peer-list-changed`) → SETUP stream.
+- Sync packets become 0xD7 time announcements: [4] frame playing at PTP time [8] (ns), [16] newest
+  frame ([16]−[4] = latency window, shairport-sync rtp.c case 215), [20] our clock ID.
+- Ports: receivers (nqptp, macOS) require our source ports to be 319/320 too. Android 17 on a Pixel
+  lets an ordinary app bind them although `ip_unprivileged_port_start` is 1024; if a phone refuses,
+  PtpMaster logs it and sends from ephemeral ports (which receivers will ignore).
+- Verified 2026-11-09 against a Mac (macOS AirPlay 980.77.5): kernel BMCA picked our clock as
+  grandmaster, 0 glitches in the receiver's session summary. Not yet verified with nqptp or Sonos.
+- The Mac logs every packet as "Transit time threshold crossed" (~630 ms) at 1.4 s latency while
+  our send lag is ~12 ms; it appears to measure against latencyMax (2 s). Harmless so far.
