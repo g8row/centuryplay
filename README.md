@@ -133,11 +133,11 @@ turn on **settings → allow external control** (off by default: any app on the 
 | `com.airplay.streamer.action.SET_VOLUME` | `volume`: 0-100; `device` (optional): only those speakers, else all |
 
 ```bash
-adb shell am broadcast -a com.airplay.streamer.action.START --es device "Kitchen"
-adb shell am broadcast -a com.airplay.streamer.action.SET_VOLUME --ei volume 30
+adb shell am broadcast -p com.airplay.streamer -a com.airplay.streamer.action.START --es device "Kitchen"
+adb shell am broadcast -p com.airplay.streamer -a com.airplay.streamer.action.SET_VOLUME --ei volume 30
 ```
 
-home assistant companion app: `command_broadcast_intent` with `intent_package_name: com.airplay.streamer` and the action above, or `command_activity`.
+the broadcast must name the package (`-p com.airplay.streamer`, tasker's "package" field): android drops broadcasts that don't. home assistant companion app: `command_broadcast_intent` with `intent_package_name: com.airplay.streamer` and the action above, or `command_activity`.
 broadcasts can only start streaming when capture needs no prompt (shizuku, or the adb appops command); send the
 command as an activity (`command_activity`, `am start -a …`) and centuryplay can show the prompt itself.
 each command answers with a `com.airplay.streamer.action.RESULT` broadcast (`action`, `success`, `message`) for tasker.

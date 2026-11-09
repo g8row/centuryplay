@@ -115,7 +115,7 @@ object ExternalControl {
             StreamController.stopAll(context)
             return Result(true, "stopped")
         }
-        val targets = names.mapNotNull { name -> state.speakers.firstOrNull { matches(it.identity, it.name, name) } }
+        val targets = names.mapNotNull { name -> matchActive(state.speakers, name) }.distinctBy { it.identity }
         if (targets.isEmpty()) return Result(false, "not streaming to ${names.joinToString()}")
         targets.forEach { StreamController.disconnect(context, it.identity) }
         return Result(true, "stopped ${targets.joinToString { it.name }}")
@@ -132,7 +132,7 @@ object ExternalControl {
             StreamController.setGroupVolume(volume)
             return Result(true, "volume ${raw.toInt()}")
         }
-        val targets = names.mapNotNull { name -> state.speakers.firstOrNull { matches(it.identity, it.name, name) } }
+        val targets = names.mapNotNull { name -> matchActive(state.speakers, name) }.distinctBy { it.identity }
         if (targets.isEmpty()) return Result(false, "not streaming to ${names.joinToString()}")
         targets.forEach { StreamController.setSpeakerVolume(it.identity, volume) }
         return Result(true, "volume ${raw.toInt()} on ${targets.joinToString { it.name }}")
@@ -144,11 +144,17 @@ object ExternalControl {
         return devices.filter { it.displayName.contains(query, ignoreCase = true) }.singleOrNull()
     }
 
+    /** Same rules for speakers in the running session (exact, then a unique "contains"). */
+    private fun matchActive(speakers: List<com.airplay.streamer.engine.SpeakerState>, query: String) =
+        speakers.firstOrNull { matches(it.identity, it.name, query) }
+            ?: speakers.filter { it.name.contains(query, ignoreCase = true) }.singleOrNull()
+
     private fun matches(identity: String, name: String, query: String) =
         name.equals(query, ignoreCase = true) || identity.equals(query, ignoreCase = true)
 }
 
-/** Broadcast form: `adb shell am broadcast -a com.airplay.streamer.action.START --es device Kitchen`. */
+/** Broadcast form: `adb shell am broadcast -p com.airplay.streamer -a com.airplay.streamer.action.START --es device Kitchen`
+ *  (needs the package or component: Android doesn't deliver implicit broadcasts to manifest receivers). */
 class ExternalControlReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val pending = goAsync()

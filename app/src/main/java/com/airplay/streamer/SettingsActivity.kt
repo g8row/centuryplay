@@ -157,14 +157,14 @@ class SettingsActivity : AppCompatActivity() {
         switch("allow external control", "let home assistant, tasker or adb start and stop streaming and set the volume. any app on the phone could then do this.", prefs.externalControl) { prefs.externalControl = it }
         action("external control commands", { "how to send them from home assistant, tasker or adb" }) {
             val text = """
-                |broadcast (or activity) actions:
+                |broadcast (to package com.airplay.streamer) or activity actions:
                 |com.airplay.streamer.action.START   device = speaker name (comma-separate several; none = last used)
                 |com.airplay.streamer.action.STOP    device = optional, only those speakers
                 |com.airplay.streamer.action.TOGGLE
                 |com.airplay.streamer.action.SET_VOLUME   volume = 0-100, device = optional
                 |
                 |adb:
-                |adb shell am broadcast -a com.airplay.streamer.action.START --es device "Kitchen"
+                |adb shell am broadcast -p com.airplay.streamer -a com.airplay.streamer.action.START --es device "Kitchen"
                 |
                 |without shizuku, send it as an activity (home assistant command_activity, or am start) so the capture prompt can show.
                 |
