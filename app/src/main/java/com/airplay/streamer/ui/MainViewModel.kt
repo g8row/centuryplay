@@ -11,6 +11,7 @@ import com.airplay.streamer.engine.SpeakerStatus
 import com.airplay.streamer.engine.Transport
 import com.airplay.streamer.service.AudioCaptureService
 import com.airplay.streamer.service.MediaInfoTracker
+import com.airplay.streamer.service.StreamController
 import com.airplay.streamer.util.Prefs
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -33,12 +34,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val tracker = MediaInfoTracker(application)
     val mediaInfo: StateFlow<MediaInfoTracker.MediaInfo> = tracker.mediaInfo
 
+    private val overridesVersion = MutableStateFlow(0)
+
     val uiState: StateFlow<MainUiState> = combine(
-        repository.devices, manualDevices, AudioCaptureService.state
-    ) { discovered, manual, session ->
+        repository.devices, manualDevices, AudioCaptureService.state, overridesVersion
+    ) { discovered, manual, session, _ ->
         val all = (discovered + manual.filter { m -> discovered.none { it.identity == m.identity } })
         val rows = all.map { d ->
-            SpeakerRow(d, session.speaker(d.identity), SinkFactory.transportFor(d, prefs.preferAirPlay2))
+            SpeakerRow(d, session.speaker(d.identity), SinkFactory.transportFor(d, prefs.preferAirPlay2, prefs.transportOverride(d.identity)))
         }.sortedWith(
             compareByDescending<SpeakerRow> { it.active }
                 .thenByDescending { it.supported }
@@ -82,6 +85,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refreshDiscovery() = repository.refresh()
+
+    /** Pin a speaker to AirPlay 1 / AirPlay 2 (null = automatic); reconnects it if it's playing. */
+    fun setTransportOverride(device: AirPlayDevice, transport: Transport?) {
+        if (prefs.transportOverride(device.identity) == transport) return
+        prefs.setTransportOverride(device.identity, transport)
+        overridesVersion.value++
+        val app = getApplication<Application>()
+        if (StreamController.isConnected(device.identity)) {
+            StreamController.disconnect(app, device.identity)
+            StreamController.connect(app, device)
+        }
+    }
 
     /** Track progress 0..1, or null when the duration is unknown. */
     fun trackProgress(): Float? {

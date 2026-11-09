@@ -17,6 +17,11 @@ class NtpTimingServer {
 
     private var socket: DatagramSocket? = null
 
+    /** Timing requests answered so far, and who sent the first (diagnostics: no requests = receiver ignores NTP). */
+    val requests = java.util.concurrent.atomic.AtomicInteger()
+    @Volatile var firstFrom: String? = null
+        private set
+
     val port: Int
         get() = socket?.localPort ?: 0
 
@@ -32,6 +37,7 @@ class NtpTimingServer {
                     s.receive(packet)
                     val received = NtpClock.nowNanos()
                     if (packet.length < 32) continue
+                    if (requests.incrementAndGet() == 1) firstFrom = "${packet.address.hostAddress}:${packet.port}"
                     val resp = ByteArray(32)
                     resp[0] = 0x80.toByte()
                     resp[1] = 0xD3.toByte()

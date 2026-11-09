@@ -24,6 +24,8 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.airplay.streamer.databinding.ActivityMainBinding
 import com.airplay.streamer.discovery.AirPlayDevice
+import com.airplay.streamer.engine.SinkFactory
+import com.airplay.streamer.engine.Transport
 import com.airplay.streamer.engine.SessionState
 import com.airplay.streamer.engine.SpeakerStatus
 import com.airplay.streamer.service.AudioCaptureService
@@ -238,6 +240,13 @@ class MainActivity : AppCompatActivity() {
             addView(TextView(this@MainActivity).apply { text = info.trim() })
             addView(offsetLabel, android.widget.LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(16) })
             addView(slider)
+            if (SinkFactory.raopPossible(d) && SinkFactory.airPlay2Possible(d)) {
+                addView(TextView(this@MainActivity).apply {
+                    setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_LabelLarge)
+                    text = getString(R.string.protocol_label)
+                }, android.widget.LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(16); bottomMargin = dp(4) })
+                addView(protocolToggle(d))
+            }
         }
         val builder = MaterialAlertDialogBuilder(this)
             .setTitle(d.displayName.lowercase())
@@ -255,6 +264,30 @@ class MainActivity : AppCompatActivity() {
             }
         }
         builder.show()
+    }
+
+    /** Auto / AirPlay 1 / AirPlay 2 for speakers that offer both (mainly for troubleshooting). */
+    private fun protocolToggle(d: AirPlayDevice): View {
+        val options = listOf(null to R.string.protocol_auto, Transport.RAOP to R.string.protocol_airplay1, Transport.AIRPLAY2 to R.string.protocol_airplay2)
+        val group = com.google.android.material.button.MaterialButtonToggleGroup(this).apply {
+            isSingleSelection = true
+            isSelectionRequired = true
+        }
+        val current = prefs.transportOverride(d.identity)
+        options.forEach { (transport, label) ->
+            val button = com.google.android.material.button.MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+                id = View.generateViewId()
+                text = getString(label)
+                isAllCaps = false
+                tag = transport
+            }
+            group.addView(button, android.widget.LinearLayout.LayoutParams(0, -2, 1f))
+            if (transport == current) group.check(button.id)
+        }
+        group.addOnButtonCheckedListener { g, id, checked ->
+            if (checked) viewModel.setTransportOverride(d, g.findViewById<View>(id).tag as Transport?)
+        }
+        return group
     }
 
     private fun setupControls() {

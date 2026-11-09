@@ -53,6 +53,7 @@ class StreamSession(
     private val passwordFor: (String) -> String?,
     private val initialVolumeFor: (String) -> Float,
     private val offsetFor: (String) -> Int = { 0 },
+    private val transportOverrideFor: (String) -> Transport? = { null },
     private val hapStore: com.airplay.streamer.airplay2.HapCredentialStore? = null,
 ) : AudioSink.Listener {
 
@@ -168,7 +169,7 @@ class StreamSession(
         val device = entry.device
         var attempt = 0
         while (scope.isActive && !entry.removed) {
-            val transport = entry.forcedTransport ?: SinkFactory.transportFor(device, settings.preferAirPlay2)
+            val transport = entry.forcedTransport ?: SinkFactory.transportFor(device, settings.preferAirPlay2, transportOverrideFor(device.identity))
             setSpeaker(device, if (attempt == 0 && initial) SpeakerStatus.CONNECTING else SpeakerStatus.RECONNECTING, entry.volume, transport)
             val usePin = forcePin.remove(device.identity)
             val sink = try {

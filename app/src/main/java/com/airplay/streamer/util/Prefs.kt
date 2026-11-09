@@ -123,6 +123,12 @@ class Prefs(context: Context) {
     fun speakerOffsetMs(identity: String): Int = raw.getInt("offset_$identity", 0)
     fun setSpeakerOffsetMs(identity: String, ms: Int) = raw.edit().putInt("offset_$identity", ms).apply()
 
+    /** Per-speaker protocol choice (null = automatic). */
+    fun transportOverride(identity: String): com.airplay.streamer.engine.Transport? =
+        raw.getString("transport_$identity", null)?.let { runCatching { com.airplay.streamer.engine.Transport.valueOf(it) }.getOrNull() }
+    fun setTransportOverride(identity: String, t: com.airplay.streamer.engine.Transport?) =
+        raw.edit().apply { if (t == null) remove("transport_$identity") else putString("transport_$identity", t.name) }.apply()
+
     fun password(identity: String): String? = secrets.getString("pw_$identity", null)
     fun setPassword(identity: String, password: String?) =
         secrets.edit().apply { if (password == null) remove("pw_$identity") else putString("pw_$identity", password) }.apply()

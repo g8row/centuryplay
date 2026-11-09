@@ -51,6 +51,18 @@ object BinaryPlist {
 
     fun data(dict: NSDictionary, key: String): ByteArray? = (dict[key] as? NSData)?.bytes()
 
+    /** Compact one-line rendering for logs (binary data shown as its size). */
+    fun describe(obj: NSObject?, maxLen: Int = 1500): String {
+        fun render(o: NSObject?): String = when (o) {
+            null -> "null"
+            is NSDictionary -> o.keys.sorted().joinToString(", ", "{", "}") { "$it=${render(o[it])}" }
+            is NSArray -> o.array.joinToString(", ", "[", "]") { render(it) }
+            is NSData -> "<${o.bytes().size} bytes>"
+            else -> o.toJavaObject()?.toString() ?: o.toString()
+        }
+        return render(obj).let { if (it.length > maxLen) it.take(maxLen) + "…" else it }
+    }
+
     fun firstStream(dict: NSDictionary): NSDictionary? =
         (dict["streams"] as? NSArray)?.array?.firstOrNull() as? NSDictionary
 }

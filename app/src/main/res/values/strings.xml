@@ -44,6 +44,10 @@
     <string name="pin_hint">code or password</string>
     <string name="pair_with_code">pair with code</string>
     <string name="forget_pairing">forget pairing</string>
+    <string name="protocol_label">protocol</string>
+    <string name="protocol_auto">auto</string>
+    <string name="protocol_airplay1">airplay 1</string>
+    <string name="protocol_airplay2">airplay 2</string>
     <string name="capture_permission_denied">audio capture wasn\'t allowed</string>
     <string name="permission_required">centuryplay needs audio capture permission to stream</string>
     <string name="route_description">airplay · centuryplay</string>

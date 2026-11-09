@@ -82,6 +82,10 @@ class AirPlay2Sink(
 
     private val packetsSent = AtomicLong()
     private val packetsResent = AtomicLong()
+    // Diagnostics (issue #3: Sonos accepts the session but stays silent).
+    private val resendRequests = AtomicLong()
+    private val otherControl = java.util.concurrent.ConcurrentHashMap<Int, Int>()
+    private var streamingSince = 0L
     private var lastTrack: TrackMetadata? = null
 
     override fun connect(context: StreamContext) {
@@ -98,7 +102,10 @@ class AirPlay2Sink(
             // GET /info before SETUP, as pyatv, OwnTone and Apple senders do; Macs don't answer
             // SETUP without it.
             runCatching { exchange("GET", "/info") }
-                .onSuccess { LogServer.d(TAG, "GET /info -> ${it.statusCode}") }
+                .onSuccess {
+                    LogServer.d(TAG, "GET /info -> ${it.statusCode}")
+                    runCatching { infoSummary(BinaryPlist.decode(it.body)) }.getOrNull()?.let { s -> LogServer.d(TAG, "info: $s") }
+                }
                 .onFailure { LogServer.d(TAG, "GET /info failed: ${it.message}") }
 
             val eventPort = setupSession()
@@ -114,6 +121,7 @@ class AirPlay2Sink(
             exchange("FLUSH", sessionUri, mapOf("Range" to "npt=0-", "RTP-Info" to "seq=$seq;rtptime=${rtp(firstFrame)}"))
 
             running = true
+            streamingSince = System.currentTimeMillis()
             startFeedbackLoop()
             startSyncSender()
             LogServer.d(TAG, "$displayName: AirPlay 2 streaming (${if (useAlac) "ALAC" else "PCM"}, NTP)")
@@ -232,6 +240,7 @@ class AirPlay2Sink(
         }
         if (resp.statusCode != 200) throw SinkException(SinkError.PROTOCOL, "SETUP rejected: ${resp.statusCode}")
         val dict = BinaryPlist.decode(resp.body)
+        LogServer.d(TAG, "SETUP session -> ${BinaryPlist.describe(dict)}")
         return BinaryPlist.int(dict, "eventPort") ?: throw SinkException(SinkError.PROTOCOL, "SETUP missing eventPort")
     }
 
@@ -262,7 +271,9 @@ class AirPlay2Sink(
         )
         val resp = exchange("SETUP", sessionUri, body = body, contentType = BinaryPlist.CONTENT_TYPE)
         if (resp.statusCode != 200) throw SinkException(SinkError.PROTOCOL, "stream SETUP rejected: ${resp.statusCode}")
-        val stream = BinaryPlist.firstStream(BinaryPlist.decode(resp.body))
+        val streamDict = BinaryPlist.decode(resp.body)
+        LogServer.d(TAG, "SETUP stream -> ${BinaryPlist.describe(streamDict)}")
+        val stream = BinaryPlist.firstStream(streamDict)
             ?: throw SinkException(SinkError.PROTOCOL, "stream SETUP missing streams")
         dataPort = BinaryPlist.int(stream, "dataPort") ?: throw SinkException(SinkError.PROTOCOL, "missing dataPort")
         serverControlPort = BinaryPlist.int(stream, "controlPort") ?: 0
@@ -312,6 +323,7 @@ class AirPlay2Sink(
                     break
                 }
                 if (!running) break
+                logDiagnostics()
                 try {
                     exchangePost("/feedback")
                     failures = 0
@@ -375,7 +387,10 @@ class AirPlay2Sink(
             while (!sock.isClosed) {
                 try {
                     sock.receive(pkt)
-                    if (pkt.length >= 8 && (buf[1].toInt() and 0x7F) == 0x55) {
+                    val type = buf[1].toInt() and 0x7F
+                    if (type != 0x55) otherControl.merge(type, 1, Int::plus)
+                    if (pkt.length >= 8 && type == 0x55) {
+                        resendRequests.incrementAndGet()
                         val first = ((buf[4].toInt() and 0xFF) shl 8) or (buf[5].toInt() and 0xFF)
                         val count = ((buf[6].toInt() and 0xFF) shl 8) or (buf[7].toInt() and 0xFF)
                         for (i in 0 until count.coerceAtMost(BACKLOG)) {
@@ -396,6 +411,30 @@ class AirPlay2Sink(
                 }
             }
         }
+    }
+
+    // ------------------------------------------------------------------ diagnostics
+
+    private var diagnosticsLogged = 0
+
+    /** Summaries 4 s, 10 s and 30 s into the stream: shows whether the receiver syncs to us at all. */
+    private fun logDiagnostics() {
+        val elapsed = System.currentTimeMillis() - streamingSince
+        val due = longArrayOf(4_000, 10_000, 30_000)
+        if (diagnosticsLogged >= due.size || elapsed < due[diagnosticsLogged]) return
+        diagnosticsLogged++
+        val other = otherControl.entries.joinToString { "0x%02X×%d".format(it.key, it.value) }.ifEmpty { "none" }
+        LogServer.d(
+            TAG, "$displayName diag @${elapsed / 1000}s: timing requests=${timingServer.requests.get()}" +
+                (timingServer.firstFrom?.let { " (from $it)" } ?: " (none: receiver isn't using our NTP clock)") +
+                ", resend requests=${resendRequests.get()}, other control=$other, audio pkts=${packetsSent.get()}" +
+                ", dataPort=$dataPort, controlPort=$serverControlPort"
+        )
+    }
+
+    private fun infoSummary(info: com.dd.plist.NSDictionary): String {
+        val keys = listOf("model", "manufacturer", "sourceVersion", "features", "statusFlags", "PTPInfo", "protocolVersion", "sdk", "audioLatencies", "supportedFormats")
+        return keys.filter { info.containsKey(it) }.joinToString(", ") { "$it=${BinaryPlist.describe(info[it], 300)}" }
     }
 
     // ------------------------------------------------------------------ control

@@ -313,6 +313,7 @@ class AudioCaptureService : Service() {
             passwordFor = { prefs.password(it) },
             initialVolumeFor = { prefs.speakerVolume(it) },
             offsetFor = { prefs.speakerOffsetMs(it) },
+            transportOverrideFor = { prefs.transportOverride(it) },
             hapStore = prefs.hapStore,
         )
         s.onSourceEnded = { mainHandler.post { if (session === s) endSession("capture ended") } }

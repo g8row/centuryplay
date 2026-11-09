@@ -16,11 +16,13 @@ object SinkFactory {
      * every shairport-sync/AirPort/AVR). AirPlay 2 (transient pairing, NTP) for devices that
      * only accept AirPlay 2 without FairPlay, e.g. HomePod, Apple TV, Macs, Sonos.
      * shairport-sync in AirPlay 2 mode only supports PTP timing, so it always gets RAOP.
+     * A per-speaker [override] (speaker details → protocol) wins when the device supports it.
      */
-    fun transportFor(device: AirPlayDevice, preferAirPlay2: Boolean = false): Transport {
-        val txt = device.features
-        val raopOk = device.raopPort != null && !RaopCapabilities.requiresUnsupportedFairPlay(txt)
-        val ap2Ok = device.protocolVersion == 2 && AirPlay2Capabilities.usesTransientAirPlay2(txt) && !isShairportSync(device)
+    fun transportFor(device: AirPlayDevice, preferAirPlay2: Boolean = false, override: Transport? = null): Transport {
+        val raopOk = raopPossible(device)
+        val ap2Ok = airPlay2Possible(device)
+        if (override == Transport.RAOP && raopOk) return Transport.RAOP
+        if (override == Transport.AIRPLAY2 && ap2Ok) return Transport.AIRPLAY2
         // Sonos' AirPlay support is AirPlay 2 (its RAOP endpoint wants MFi auth-setup).
         val ap2First = preferAirPlay2 || isSonos(device)
         return when {
@@ -30,6 +32,12 @@ object SinkFactory {
             else -> Transport.UNSUPPORTED
         }
     }
+
+    fun raopPossible(device: AirPlayDevice): Boolean =
+        device.raopPort != null && !RaopCapabilities.requiresUnsupportedFairPlay(device.features)
+
+    fun airPlay2Possible(device: AirPlayDevice): Boolean =
+        device.protocolVersion == 2 && AirPlay2Capabilities.usesTransientAirPlay2(device.features) && !isShairportSync(device)
 
     fun isSonos(device: AirPlayDevice): Boolean =
         device.features["manufacturer"]?.contains("Sonos", ignoreCase = true) == true
