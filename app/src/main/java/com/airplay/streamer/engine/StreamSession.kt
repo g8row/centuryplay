@@ -182,6 +182,7 @@ class StreamSession(
                     clockMode = settings.clockMode,
                 )
             } catch (e: SinkException) {
+                LogServer.log("Speaker ${device.displayName} can't be used: ${e.message}")
                 setSpeaker(device, SpeakerStatus.FAILED, entry.volume, transport, e.message)
                 return
             }

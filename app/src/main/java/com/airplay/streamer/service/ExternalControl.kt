@@ -8,6 +8,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.airplay.streamer.discovery.AirPlayDevice
 import com.airplay.streamer.discovery.DiscoveryRepository
+import com.airplay.streamer.engine.SinkFactory
+import com.airplay.streamer.engine.Transport
 import com.airplay.streamer.shizuku.ShizukuManager
 import com.airplay.streamer.util.LogServer
 import com.airplay.streamer.util.Prefs
@@ -93,7 +95,11 @@ object ExternalControl {
                 if (names.isEmpty()) prefs.lastSpeakers.map { id -> list.firstOrNull { it.identity == id } }
                 else names.map { match(list, it) }
             }
-            val found = withTimeoutOrNull(5000) { repo.devices.first { list -> resolve(list).all { it != null } } }
+            // Wait until every speaker is found *and* usable: a device's records arrive one by one
+            // (e.g. a Mac's FairPlay-only RAOP record before its AirPlay 2 one), and connecting to
+            // a half-merged device fails as unsupported.
+            val usable = { d: AirPlayDevice? -> d != null && SinkFactory.transportFor(d, prefs.preferAirPlay2, prefs.transportOverride(d.identity)) != Transport.UNSUPPORTED }
+            val found = withTimeoutOrNull(5000) { repo.devices.first { list -> resolve(list).all(usable) } }
                 ?: repo.devices.value
             val resolved = resolve(found)
             val devices = resolved.filterNotNull().distinctBy { it.identity }

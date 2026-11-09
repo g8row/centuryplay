@@ -92,6 +92,9 @@ class AirPlay2Sink(
     private val resendRequests = AtomicLong()
     private val otherControl = java.util.concurrent.ConcurrentHashMap<Int, Int>()
     private var streamingSince = 0L
+    // How far the capture timeline is ahead of the packet being sent (ms): capture pipeline
+    // delay, which the configured latency must cover.
+    @Volatile private var sendLagMs = 0L
     private var lastTrack: TrackMetadata? = null
     private var ptpPeer: InetAddress? = null
 
@@ -359,6 +362,9 @@ class AirPlay2Sink(
         System.arraycopy(encrypted, 0, out, 12, encrypted.size)
         System.arraycopy(nonce, 4, out, 12 + encrypted.size, 8)
         firstPacket = false
+        if (context.timeline.isStarted) {
+            sendLagMs = (context.timeline.frameAt(NtpClock.nowNanos()) - packet.frameIndex) * 1000 / context.sampleRate
+        }
         backlog[seq and (BACKLOG - 1)] = out
         try {
             audioSocket?.send(DatagramPacket(out, out.size, address, dataPort))
@@ -508,6 +514,7 @@ class AirPlay2Sink(
         LogServer.d(
             TAG, "$displayName diag @${elapsed / 1000}s: $timing" +
                 ", resend requests=${resendRequests.get()}, other control=$other, audio pkts=${packetsSent.get()}" +
+                ", send lag=${sendLagMs} ms of ${context.latencyFrames * 1000 / context.sampleRate} ms latency" +
                 ", dataPort=$dataPort, controlPort=$serverControlPort"
         )
     }
