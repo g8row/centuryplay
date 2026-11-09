@@ -86,7 +86,10 @@ class RaopSink(
 
     // Encryption
     private val encryptionTypes = RaopCapabilities.encryptionTypes(txt).ifEmpty { setOf(0, 1) }
-    private val useRsa = 0 !in encryptionTypes && 1 in encryptionTypes
+    // Kodi's libshairplay advertises et=0,1 but only sets up its RTP receiver when ANNOUNCE
+    // carries rsaaeskey/aesiv; without them it drops the connection at SETUP (issue #12).
+    private val isShairplay = (txt["am"] ?: "").let { it.startsWith("Kodi") || it.startsWith("Xbmc") }
+    private val useRsa = 1 in encryptionTypes && (0 !in encryptionTypes || isShairplay)
     private val mfiAuthUpfront = 4 in encryptionTypes && (txt["am"] ?: "").startsWith("AirPort")
     private var aesKey: ByteArray? = null
     private var aesIv: ByteArray? = null
