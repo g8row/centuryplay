@@ -12,6 +12,7 @@ import com.airplay.streamer.raop.RaopCapabilities
 object AirPlay2Capabilities {
 
     private const val SUPPORTS_UNIFIED_MEDIA_CONTROL = 1L shl 38
+    private const val SUPPORTS_PTP = 1L shl 41
     private const val SUPPORTS_SYSTEM_PAIRING = 1L shl 43
     private const val SUPPORTS_COREUTILS_PAIRING_ENCRYPTION = 1L shl 48
 
@@ -50,6 +51,9 @@ object AirPlay2Capabilities {
      */
     fun blockedByFairPlay(txt: Map<String, String>): Boolean =
         RaopCapabilities.requiresUnsupportedFairPlay(txt) && !usesTransientAirPlay2(txt)
+
+    /** Feature bit 41 "SupportsPTP" (OwnTone airplay.c features table). */
+    fun supportsPtp(txt: Map<String, String>): Boolean = (featuresValue(txt) and SUPPORTS_PTP) != 0L
 
     /** True if the device accepts transient pairing (PIN 3939) — e.g. Sonos, HomePod. */
     fun needsTransient(txt: Map<String, String>): Boolean {

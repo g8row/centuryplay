@@ -42,6 +42,12 @@ class AirPlay2Sink(
     /** Blocks until the user enters the code shown on / set for the receiver; null = cancelled. */
     private val pinProvider: ((String) -> String?)? = null,
     private val forcePin: Boolean = false,
+    /**
+     * PTP timing instead of NTP (OwnTone airplay.c `use_ptp`): we act as PTP grandmaster
+     * ([PtpMaster]) and anchor the stream with 0xD7 time announcements. Needed by receivers
+     * that only follow PTP (shairport-sync AP2, likely Sonos: issue #3).
+     */
+    private val usePtp: Boolean = false,
 ) : AudioSink {
 
     /**
@@ -87,11 +93,12 @@ class AirPlay2Sink(
     private val otherControl = java.util.concurrent.ConcurrentHashMap<Int, Int>()
     private var streamingSince = 0L
     private var lastTrack: TrackMetadata? = null
+    private var ptpPeer: InetAddress? = null
 
     override fun connect(context: StreamContext) {
         this.context = context
         try {
-            timingServer.start()
+            if (!usePtp) timingServer.start()
             controlSocket = DatagramSocket()
             startControlListener()
 
@@ -112,19 +119,26 @@ class AirPlay2Sink(
             eventChannel = AirPlay2EventChannel(host, eventPort, sharedKey).also {
                 if (!it.connectWithRetries()) LogServer.d(TAG, "Event channel failed to open (continuing)")
             }
-            setupStream(sharedKey)
-            audioSocket = DatagramSocket()
-
-            val nowFrame = if (context.timeline.isStarted) context.timeline.frameAt(NtpClock.nowNanos()) else 0L
-            val firstFrame = (nowFrame / AudioPacket.FRAMES + 1) * AudioPacket.FRAMES
-            exchange("RECORD", sessionUri, mapOf("Range" to "npt=0-"))
-            exchange("FLUSH", sessionUri, mapOf("Range" to "npt=0-", "RTP-Info" to "seq=$seq;rtptime=${rtp(firstFrame)}"))
+            if (usePtp) {
+                // OwnTone's order for PTP sessions: RECORD → SETPEERS → SETUP (stream).
+                exchange("RECORD", sessionUri)
+                setPeers()
+                setupStream(sharedKey)
+                audioSocket = DatagramSocket()
+            } else {
+                setupStream(sharedKey)
+                audioSocket = DatagramSocket()
+                val nowFrame = if (context.timeline.isStarted) context.timeline.frameAt(NtpClock.nowNanos()) else 0L
+                val firstFrame = (nowFrame / AudioPacket.FRAMES + 1) * AudioPacket.FRAMES
+                exchange("RECORD", sessionUri, mapOf("Range" to "npt=0-"))
+                exchange("FLUSH", sessionUri, mapOf("Range" to "npt=0-", "RTP-Info" to "seq=$seq;rtptime=${rtp(firstFrame)}"))
+            }
 
             running = true
             streamingSince = System.currentTimeMillis()
             startFeedbackLoop()
             startSyncSender()
-            LogServer.d(TAG, "$displayName: AirPlay 2 streaming (${if (useAlac) "ALAC" else "PCM"}, NTP)")
+            LogServer.d(TAG, "$displayName: AirPlay 2 streaming (${if (useAlac) "ALAC" else "PCM"}, ${if (usePtp) "PTP" else "NTP"})")
         } catch (e: SinkException) {
             closeQuietly(); throw e
         } catch (e: ConnectException) {
@@ -209,7 +223,7 @@ class AirPlay2Sink(
     }
 
     private fun setupSession(): Int {
-        val body = BinaryPlist.encode(
+        val body = if (usePtp) ptpSessionBody() else BinaryPlist.encode(
             mapOf(
                 "deviceID" to DEVICE_ID,
                 "sessionUUID" to UUID.randomUUID().toString().uppercase(),
@@ -241,7 +255,51 @@ class AirPlay2Sink(
         if (resp.statusCode != 200) throw SinkException(SinkError.PROTOCOL, "SETUP rejected: ${resp.statusCode}")
         val dict = BinaryPlist.decode(resp.body)
         LogServer.d(TAG, "SETUP session -> ${BinaryPlist.describe(dict)}")
+        if (usePtp) addPtpPeer(dict)
         return BinaryPlist.int(dict, "eventPort") ?: throw SinkException(SinkError.PROTOCOL, "SETUP missing eventPort")
+    }
+
+    /** Session SETUP for PTP, as OwnTone payload_make_setup_session_ptp(). */
+    private fun ptpSessionBody(): ByteArray {
+        val peerInfo = mapOf(
+            "ID" to PtpMaster.clockUuid,
+            "DeviceType" to 0,
+            "ClockID" to PtpMaster.clockId, // signed in the plist, as iOS
+            "SupportsClockPortMatchingOverride" to false,
+            "Addresses" to listOf(connection.localIp),
+        )
+        return BinaryPlist.encode(
+            mapOf(
+                "name" to senderName,
+                "deviceID" to DEVICE_ID,
+                "sessionUUID" to UUID.randomUUID().toString().uppercase(),
+                "timingProtocol" to "PTP",
+                "macAddress" to DEVICE_ID,
+                "groupUUID" to UUID.randomUUID().toString().uppercase(),
+                "groupContainsGroupLeader" to false,
+                "timingPeerInfo" to peerInfo,
+                "timingPeerList" to listOf(peerInfo),
+            )
+        )
+    }
+
+    /** Follow the receiver's timingPeerInfo addresses (first IPv4), as OwnTone handle_timingpeerinfo(). */
+    private fun addPtpPeer(setupResponse: com.dd.plist.NSDictionary) {
+        val info = setupResponse["timingPeerInfo"] as? com.dd.plist.NSDictionary
+        val addresses = (info?.get("Addresses") as? com.dd.plist.NSArray)?.array?.mapNotNull { it.toJavaObject() as? String }.orEmpty()
+        val peer = addresses.mapNotNull { runCatching { InetAddress.getByName(it) }.getOrNull() }
+            .firstOrNull { it is java.net.Inet4Address } ?: address
+        if (info == null) LogServer.d(TAG, "$displayName: no timingPeerInfo in SETUP; using ${peer.hostAddress} as PTP peer")
+        ptpPeer = peer
+        PtpMaster.addPeer(peer)
+    }
+
+    /** SETPEERS: the receiver's and our own address (OwnTone payload_make_setpeers()). */
+    private fun setPeers() {
+        val body = BinaryPlist.encodeArray(listOf(host, connection.localIp))
+        runCatching { exchange("SETPEERS", sessionUri, body = body, contentType = "/peer-list-changed") }
+            .onSuccess { LogServer.d(TAG, "SETPEERS -> ${it.statusCode}") }
+            .onFailure { LogServer.d(TAG, "SETPEERS failed: ${it.message}") }
     }
 
     private fun setupStream(sharedKey: ByteArray) {
@@ -349,7 +407,8 @@ class AirPlay2Sink(
             while (running && !sock.isClosed) {
                 try {
                     if (context.timeline.isStarted) {
-                        sock.send(DatagramPacket(syncPacket(first), 20, address, serverControlPort))
+                        val p = if (usePtp) ptpSyncPacket(first) else syncPacket(first)
+                        sock.send(DatagramPacket(p, p.size, address, serverControlPort))
                         first = false
                     }
                     Thread.sleep(if (first) 20 else 1000L)
@@ -376,6 +435,25 @@ class AirPlay2Sink(
         RaopSink.putInt(p, 4, rtp(reference))
         NtpClock.writeNtpNanos(p, 8, now)
         RaopSink.putInt(p, 16, rtp(future))
+        return p
+    }
+
+    /**
+     * 0xD7 time announcement (OwnTone sync_packet_ptp_make(), shairport-sync rtp.c case 215):
+     * frame at [4] plays at PTP time [8] (ns on [NtpClock]); [16] − [4] is the latency window
+     * the receiver accepts packets in; [20] is our PTP clock ID.
+     */
+    private fun ptpSyncPacket(first: Boolean): ByteArray {
+        val now = NtpClock.nowNanos()
+        val current = context.timeline.frameAt(now) - offsetMs.toLong() * context.sampleRate / 1000
+        val p = ByteArray(28)
+        p[0] = if (first) 0x90.toByte() else 0x80.toByte()
+        p[1] = 0xD7.toByte()
+        p[2] = 0x00; p[3] = 0x06
+        RaopSink.putInt(p, 4, rtp(current - context.latencyFrames))
+        for (i in 0 until 8) p[8 + i] = (now ushr (56 - 8 * i)).toByte()
+        RaopSink.putInt(p, 16, rtp(current))
+        for (i in 0 until 8) p[20 + i] = (PtpMaster.clockId ushr (56 - 8 * i)).toByte()
         return p
     }
 
@@ -424,9 +502,11 @@ class AirPlay2Sink(
         if (diagnosticsLogged >= due.size || elapsed < due[diagnosticsLogged]) return
         diagnosticsLogged++
         val other = otherControl.entries.joinToString { "0x%02X×%d".format(it.key, it.value) }.ifEmpty { "none" }
+        val timing = if (usePtp) "ptp messages received=${PtpMaster.received.get()}${if (PtpMaster.boundStandardPorts) "" else " (ephemeral ports)"}"
+            else "timing requests=${timingServer.requests.get()}" +
+                (timingServer.firstFrom?.let { " (from $it)" } ?: " (none: receiver isn't using our NTP clock)")
         LogServer.d(
-            TAG, "$displayName diag @${elapsed / 1000}s: timing requests=${timingServer.requests.get()}" +
-                (timingServer.firstFrom?.let { " (from $it)" } ?: " (none: receiver isn't using our NTP clock)") +
+            TAG, "$displayName diag @${elapsed / 1000}s: $timing" +
                 ", resend requests=${resendRequests.get()}, other control=$other, audio pkts=${packetsSent.get()}" +
                 ", dataPort=$dataPort, controlPort=$serverControlPort"
         )
@@ -476,6 +556,8 @@ class AirPlay2Sink(
         running = false
         eventChannel?.close()
         timingServer.stop()
+        ptpPeer?.let { PtpMaster.removePeer(it) }
+        ptpPeer = null
         runCatching { controlSocket?.close() }
         runCatching { audioSocket?.close() }
         runCatching { connection.close() }

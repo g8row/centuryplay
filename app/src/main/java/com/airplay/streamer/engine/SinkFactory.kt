@@ -9,6 +9,9 @@ import com.airplay.streamer.raop.RaopSink
 /** Which wire protocol to use for a device, and why. */
 enum class Transport { RAOP, AIRPLAY2, UNSUPPORTED }
 
+/** AirPlay 2 timing: AUTO = PTP for receivers known to need it, NTP for the rest. */
+enum class ClockMode { AUTO, NTP, PTP }
+
 object SinkFactory {
 
     /**
@@ -20,9 +23,10 @@ object SinkFactory {
      */
     fun transportFor(device: AirPlayDevice, preferAirPlay2: Boolean = false, override: Transport? = null): Transport {
         val raopOk = raopPossible(device)
-        val ap2Ok = airPlay2Possible(device)
         if (override == Transport.RAOP && raopOk) return Transport.RAOP
-        if (override == Transport.AIRPLAY2 && ap2Ok) return Transport.AIRPLAY2
+        if (override == Transport.AIRPLAY2 && airPlay2Possible(device)) return Transport.AIRPLAY2
+        // shairport-sync AP2 only does PTP; RAOP is the safe automatic choice for it.
+        val ap2Ok = airPlay2Possible(device) && !isShairportSync(device)
         // Sonos' AirPlay support is AirPlay 2 (its RAOP endpoint wants MFi auth-setup).
         val ap2First = preferAirPlay2 || isSonos(device)
         return when {
@@ -37,7 +41,18 @@ object SinkFactory {
         device.raopPort != null && !RaopCapabilities.requiresUnsupportedFairPlay(device.features)
 
     fun airPlay2Possible(device: AirPlayDevice): Boolean =
-        device.protocolVersion == 2 && AirPlay2Capabilities.usesTransientAirPlay2(device.features) && !isShairportSync(device)
+        device.protocolVersion == 2 && AirPlay2Capabilities.usesTransientAirPlay2(device.features)
+
+    /**
+     * PTP for receivers that advertise it (feature bit 41) and are known not to play with NTP:
+     * shairport-sync AP2 (NTP rejected) and Sonos (accepts NTP sessions, stays silent: #3).
+     * OwnTone uses PTP for every receiver with bit 41; [ClockMode.PTP] does the same.
+     */
+    fun usePtp(device: AirPlayDevice, mode: ClockMode): Boolean = when (mode) {
+        ClockMode.NTP -> false
+        ClockMode.PTP -> AirPlay2Capabilities.supportsPtp(device.features) || isShairportSync(device)
+        ClockMode.AUTO -> isShairportSync(device) || (isSonos(device) && AirPlay2Capabilities.supportsPtp(device.features))
+    }
 
     fun isSonos(device: AirPlayDevice): Boolean =
         device.features["manufacturer"]?.contains("Sonos", ignoreCase = true) == true
@@ -67,10 +82,11 @@ object SinkFactory {
         hapStore: com.airplay.streamer.airplay2.HapCredentialStore? = null,
         pinProvider: ((String) -> String?)? = null,
         forcePin: Boolean = false,
+        clockMode: ClockMode = ClockMode.AUTO,
     ): AudioSink = when (transport) {
         Transport.AIRPLAY2 -> AirPlay2Sink(
             device.host, device.port, device.displayName, device.features, senderName, preferPcm,
-            device.identity, hapStore, pinProvider, forcePin,
+            device.identity, hapStore, pinProvider, forcePin, usePtp(device, clockMode),
         )
         Transport.RAOP -> RaopSink(device.host, device.raopPort ?: device.port, device.displayName, device.features, preferPcm, password)
         Transport.UNSUPPORTED -> throw SinkException(SinkError.UNSUPPORTED, "${device.displayName} requires FairPlay, which isn't supported")
