@@ -58,7 +58,12 @@ class RaopSink(
     private val activeRemote = com.airplay.streamer.service.DacpServer.activeRemote
     private val sessionPath = Random.nextLong(0, Long.MAX_VALUE).toString()
 
-    private val rtsp = RtspConnection(host, port, USER_AGENT) {
+    // MFiSAP (et=4) receivers other than AirPorts get the session AirMusic sends (auth-setup
+    // first, iTunes 11 user agent, no OPTIONS, o=receiver/c=sender, initial progress). Apple's
+    // AirTunes SDK in a KEF LSX accepts our usual session but plays nothing.
+    private val airMusicStyle = 4 in RaopCapabilities.encryptionTypes(txt) && !(txt["am"] ?: "").startsWith("AirPort")
+
+    private val rtsp = RtspConnection(host, port, if (airMusicStyle) LEGACY_USER_AGENT else USER_AGENT) {
         mapOf("Client-Instance" to clientInstance, "DACP-ID" to clientInstance, "Active-Remote" to activeRemote)
     }.also { it.password = password }
 
@@ -76,7 +81,7 @@ class RaopSink(
     @Volatile private var intentionalStop = false
 
     // RTP state (capture thread)
-    private val rtpBase = Random.nextLong(0, 0xFFFFFFFFL)
+    private val rtpBase = Random.nextLong(0, if (airMusicStyle) 0x40000000L else 0xFFFFFFFFL)
     private val ssrc = Random.nextInt()
     private var seq = Random.nextInt(0, 0xFFFF)
     private var firstPacket = true
@@ -112,24 +117,22 @@ class RaopSink(
         this.context = context
         try {
             rtsp.open()
-            // OPTIONS doubles as a password probe (401 here means the speaker is protected).
-            val options = rtsp.request(
-                "OPTIONS", "*", mapOf("Apple-Challenge" to Base64.getEncoder().withoutPadding().encodeToString(Random.nextBytes(16)))
-            )
-            checkAuth(options)
-            if (mfiAuthUpfront) authSetup()
+            val challenge = mapOf("Apple-Challenge" to Base64.getEncoder().withoutPadding().encodeToString(Random.nextBytes(16)))
+            if (airMusicStyle) {
+                authSetup()
+            } else {
+                // OPTIONS doubles as a password probe (401 here means the speaker is protected).
+                checkAuth(rtsp.request("OPTIONS", "*", challenge))
+                if (mfiAuthUpfront) authSetup()
+            }
 
             audioSocket = DatagramSocket()
             controlSocket = DatagramSocket()
             timingSocket = DatagramSocket()
             startTimingResponder()
 
-            var announce = rtsp.request("ANNOUNCE", uri(), mapOf("Content-Type" to "application/sdp"), buildSdp().toByteArray(Charsets.UTF_8))
-            if (announce.code == 403 && 4 in encryptionTypes && !mfiAuthUpfront) {
-                // Some et=4 receivers (Denon, per OwnTone raop.c) refuse ANNOUNCE until auth-setup.
-                authSetup()
-                announce = rtsp.request("ANNOUNCE", uri(), mapOf("Content-Type" to "application/sdp"), buildSdp().toByteArray(Charsets.UTF_8))
-            }
+            val announceHeaders = mapOf("Content-Type" to "application/sdp") + (if (airMusicStyle) challenge else emptyMap())
+            val announce = rtsp.request("ANNOUNCE", uri(), announceHeaders, buildSdp().toByteArray(Charsets.UTF_8))
             checkAuth(announce)
             expectOk(announce, "ANNOUNCE")
 
@@ -157,6 +160,11 @@ class RaopSink(
                 sessionHeaders() + mapOf("Range" to "npt=0-", "RTP-Info" to "seq=$seq;rtptime=${rtp(firstFrame)}")
             )
             expectOk(record, "RECORD")
+            if (airMusicStyle) {
+                val start = rtp(firstFrame)
+                val progress = "progress: $start/$start/$start\r\n".toByteArray(Charsets.US_ASCII)
+                rtsp.request("SET_PARAMETER", uri(), sessionHeaders() + mapOf("Content-Type" to "text/parameters"), progress)
+            }
             record.header("Audio-Latency")?.toIntOrNull()?.let { receiverLatency = it }
 
             running = true
@@ -203,7 +211,10 @@ class RaopSink(
     /** MFiSAP auth-setup as pyatv support/rtsp.py: 0x01 + static Curve25519 key, unverified. */
     private fun authSetup() {
         val body = byteArrayOf(0x01) + AUTH_SETUP_PUBLIC_KEY
-        val resp = rtsp.request("POST", "/auth-setup", mapOf("Content-Type" to "application/octet-stream"), body, protocol = "HTTP/1.1")
+        val resp = rtsp.request(
+            "POST", "/auth-setup", mapOf("Content-Type" to "application/octet-stream"), body,
+            protocol = if (airMusicStyle) "RTSP/1.0" else "HTTP/1.1"
+        )
         LogServer.d(TAG, "auth-setup -> ${resp.code}")
     }
 
@@ -214,9 +225,10 @@ class RaopSink(
     private fun buildSdp(): String {
         val sb = StringBuilder()
         sb.append("v=0\r\n")
-        sb.append("o=iTunes $sessionPath 0 IN IP4 ${rtsp.localIp}\r\n")
+        val (origin, connection) = if (airMusicStyle) host to rtsp.localIp else rtsp.localIp to host
+        sb.append("o=iTunes $sessionPath 0 IN IP4 $origin\r\n")
         sb.append("s=iTunes\r\n")
-        sb.append("c=IN IP4 $host\r\n")
+        sb.append("c=IN IP4 $connection\r\n")
         sb.append("t=0 0\r\n")
         sb.append("m=audio 0 RTP/AVP 96\r\n")
         if (useAlac) {
@@ -488,6 +500,7 @@ class RaopSink(
     companion object {
         private const val TAG = "RaopSink"
         private const val USER_AGENT = "iTunes/12.12 (Macintosh; OS X 13.0)"
+        private const val LEGACY_USER_AGENT = "iTunes/11.3.1 (Macintosh; OS X 10.9.4) AppleWebKit/537.77.4"
         private const val BACKLOG = 1024 // power of two; ~8 s of audio
         private const val SYNC_INTERVAL_MS = 1000L
         private const val HEALTH_INTERVAL_MS = 2000L
