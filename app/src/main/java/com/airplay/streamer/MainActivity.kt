@@ -180,7 +180,7 @@ class MainActivity : AppCompatActivity() {
         val container = FrameLayout(this).apply { setPadding(dp(24), dp(8), dp(24), 0); addView(input) }
         MaterialAlertDialogBuilder(this)
             .setTitle(getString(R.string.pin_title, device.displayName.lowercase()))
-            .setMessage(R.string.pin_message)
+            .setMessage(if (macWithPassword(device)) R.string.pin_message_mac_password else R.string.pin_message)
             .setView(container)
             .setPositiveButton(R.string.ok) { _, _ -> StreamController.submitPin(device.identity, input.text.toString()) }
             .setNegativeButton(R.string.cancel) { _, _ -> StreamController.submitPin(device.identity, null) }
@@ -288,6 +288,16 @@ class MainActivity : AppCompatActivity() {
             if (checked) viewModel.setTransportOverride(d, g.findViewById<View>(id).tag as Transport?)
         }
         return group
+    }
+
+    /**
+     * A Mac with "require password" on advertises flags bit 9 (one-time pairing required) and
+     * refuses transient pairing; it then wants that password, though a code briefly flashes.
+     */
+    private fun macWithPassword(device: AirPlayDevice): Boolean {
+        val model = device.features["model"] ?: device.features["am"] ?: ""
+        val flags = device.features["flags"]?.removePrefix("0x")?.toLongOrNull(16) ?: 0L
+        return model.startsWith("Mac") && (flags and 0x200L) != 0L
     }
 
     private fun setupControls() {

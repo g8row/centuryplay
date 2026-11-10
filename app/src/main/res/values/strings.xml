@@ -42,6 +42,7 @@
     <string name="pin_title">pair with %s</string>
     <string name="pin_message">enter the code shown on the tv/speaker, or the airplay password you set on it. you only need to do this once.</string>
     <string name="pin_hint">code or password</string>
+    <string name="pin_message_mac_password">this mac requires its airplay password (system settings → general → airdrop &amp; handoff → airplay receiver). a code may flash on the mac, but it\'s the password that works.</string>
     <string name="pair_with_code">pair with code</string>
     <string name="forget_pairing">forget pairing</string>
     <string name="protocol_label">protocol</string>
